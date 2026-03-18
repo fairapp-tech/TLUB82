@@ -1,23 +1,35 @@
 <script>
 // Plik: JS-State.html
-// Wersja: Smart Cache Fallback State
+// Wersja: Turbo V8 (Vacation Custom Inputs)
 
 const state = {
   // Dane
   employees: [],
-  // NOWE: Metadane o źródle danych pracowników (LIVE vs CACHE)
   employeeMeta: { 
-      source: 'NONE', // 'LIVE', 'CACHE', 'NONE'
-      date: null,     // String sformatowany
-      timestamp: 0    // Timestamp JS
+      source: 'NONE', 
+      date: null, 
+      timestamp: 0 
   },
-  showOldDataConfirmed: false, // Flaga: czy użytkownik potwierdził, że chce widzieć stare dane z Cache
+  showOldDataConfirmed: false,
 
   tasks: [],
   stowData: [],
-  planningData: [], // Dane z planowania UB8 (Beauty)
-  groupStats: null, // Statystyki grupy i plan tygodniowy
+  planningData: [], 
+  groupStats: null, 
   
+  // Urlopy
+  vacations: [], 
+  
+  // Urlopy - Filtry i Widoki
+  vacationFilters: {
+      year: new Date().getFullYear(),
+      status: 'ALL' // 'ALL', 'Oczekujący', 'Potwierdzony', 'Odrzucony'
+  },
+  vacationViewMode: 'weeks', // 'list' lub 'weeks'
+  
+  isVacationsLoaded: false,
+  isVacationsFetching: false,
+
   // Struktura widgetów
   widgets: {
       stow: { today: [], recent: [], recentDateLabel: '' },
@@ -36,8 +48,8 @@ const state = {
   isEmployeeTaskMode: true, 
   
   // Stan interfejsu
-  selectedEmployeeNames: new Set(), // Dla trybu zadań
-  pendingAssignments: new Map(), // Dla trybów rotacyjnych (Trwałe zaznaczenie + parametry)
+  selectedEmployeeNames: new Set(), 
+  pendingAssignments: new Map(), 
   
   taskToDelete: { id: null, isBulk: false },
   taskToEditId: null,
@@ -62,7 +74,7 @@ const state = {
   // === USTAWIENIA ===
   settings: {
       defaultMode: 'tasks', 
-      userGroup: '', // Grupa użytkownika (A-H)
+      userGroup: '', 
       customRoles: {
           support: ['Unloading', 'Receive', 'Pack', 'Shipping', 'Zwroty', 'Jakość', 'Problem Solver'], 
           missions: ['Kartony', 'X-info', 'Sprzątanie', 'Bufory'] 
@@ -109,6 +121,7 @@ const dom = {
   stowBatchFloor: document.getElementById('stowBatchFloor'),
   stowBatchBreak: document.getElementById('stowBatchBreak'), 
   batchRoleSelect: document.getElementById('batchRoleSelect'),
+  batchDurationSelect: document.getElementById('batchDurationSelect'),
   batchIgnoreCollisions: document.getElementById('batchIgnoreCollisions'),
 
   // Right Panel
@@ -118,6 +131,7 @@ const dom = {
   // Nav
   navEmployee: document.getElementById('navEmployee'),
   navBriefing: document.getElementById('navBriefing'),
+  navAnnouncements: document.getElementById('navAnnouncements'),
   navPersonal: document.getElementById('navPersonal'),
   
   // Modals - Standardowe
@@ -166,6 +180,19 @@ const dom = {
   // === MODAL KOLIZJI ===
   collisionModal: document.getElementById('collisionModal'),
   collisionModalText: document.getElementById('collisionModalText'),
-  confirmCollisionBtn: document.getElementById('confirmCollisionBtn')
+  confirmCollisionBtn: document.getElementById('confirmCollisionBtn'),
+
+  // === MODAL URLOPÓW (ZAKTUALIZOWANE) ===
+  vacationModal: document.getElementById('vacationModal'),
+  vacationEmployeeName: document.getElementById('vacationEmployeeName'),
+  vacationStart: document.getElementById('vacationStart'),
+  vacationEnd: document.getElementById('vacationEnd'),
+  vacationNote: document.getElementById('vacationNote'),
+  vacationConfirmed: document.getElementById('vacationConfirmed'),
+  saveVacationBtn: document.getElementById('saveVacationBtn'),
+  
+  // Nowe pola do ręcznej edycji czasu zgłoszenia
+  vacationSubmitDate: document.getElementById('vacationSubmitDate'),
+  vacationSubmitTime: document.getElementById('vacationSubmitTime')
 };
 </script>

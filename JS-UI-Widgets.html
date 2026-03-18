@@ -1,8 +1,7 @@
 <script>
 // Plik: JS-UI-Widgets.html
-// Moduł: Widgety Prawego Panelu (Rotacja, Beauty, Ostatnio, Info o Grupie, KALENDARZ)
-// Funkcje: renderStowersWidgetUI, setBeautyDay, handleWidgetDelete, calendar logic
-// Wersja: Turbo V19 (Beauty Undo UI Added)
+// Moduł: Widgety Prawego Panelu (Rotacja, Beauty, Ostatnio, Info o Grupie, KALENDARZ, URLOPY V6, SZYBKA NOTATKA)
+// Wersja: Turbo V53 (Skills Stats: Only Free Employees)
 
 console.log("Ładowanie modułu UI Widgets...");
 
@@ -18,14 +17,16 @@ function renderStowersWidgetUI() {
   if (typeof state.beautyDayOffset === 'undefined') state.beautyDayOffset = 0;
   if (typeof state.calendarOffset === 'undefined') state.calendarOffset = 0;
   if (typeof state.calendarData === 'undefined') state.calendarData = null;
+  if (typeof state.vacationFilters === 'undefined') {
+      state.vacationFilters = { year: new Date().getFullYear(), status: 'ALL' };
+  }
+  if (typeof state.vacationViewMode === 'undefined') state.vacationViewMode = 'weeks';
 
   container.innerHTML = ''; 
   
-  // Obliczanie dzisiejszej daty dla etykiet
   const todayDate = new Date();
   const todayStr = todayDate.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
   
-  // --- HELPER BUDOWANIA KARTY ---
   const createCard = (titleHtml, countDisplay, colorClass, icon, content, isVisible = true) => {
       if (!isVisible) return '';
       return `
@@ -53,11 +54,59 @@ function renderStowersWidgetUI() {
     beauty: { title: 'Beauty', color: 'fuchsia', labelColor: 'bg-fuchsia-100 text-fuchsia-700' }
   };
 
-  // --- 1. KARTA ROTACJI "OBSADA DZIŚ" (BEZ BEAUTY) ---
+  // --- 0. WIDGET SZYBKA NOTATKA (NOWE) ---
+  const noteContent = `
+    <div id="widgetTaskComposer" class="p-3 space-y-3">
+        <!-- Kategorie -->
+        <div class="flex gap-1 justify-between">
+             <button data-category="Dla pracownika" onclick="if(typeof handleCategorySwitch === 'function') handleCategorySwitch('Dla pracownika', this)" class="category-btn active-category flex-1 py-1 text-[10px] font-bold rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition">Pracownik</button>
+             <button data-category="Na odprawę" onclick="if(typeof handleCategorySwitch === 'function') handleCategorySwitch('Na odprawę', this)" class="category-btn flex-1 py-1 text-[10px] font-bold rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition">Odprawa</button>
+             <button data-category="Ogłoszenia" onclick="if(typeof handleCategorySwitch === 'function') handleCategorySwitch('Ogłoszenia', this)" class="category-btn flex-1 py-1 text-[10px] font-bold rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition">Ogłoszenia</button>
+             <button data-category="Osobista" onclick="if(typeof handleCategorySwitch === 'function') handleCategorySwitch('Osobista', this)" class="category-btn flex-1 py-1 text-[10px] font-bold rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition">Inne</button>
+        </div>
+        
+        <div id="taskEmptyState" class="text-[10px] text-center text-slate-400 py-1 hidden">Wybierz os. z listy.</div>
+
+        <!-- Edytor -->
+        <div id="taskForm" class="space-y-2">
+             <div id="richEditorWidget" class="rich-editor-container bg-white flex flex-col border border-slate-300 rounded">
+                 <div class="editor-toolbar bg-slate-50 border-b border-slate-200 p-1 flex gap-1 flex-wrap">
+                     <button type="button" class="editor-btn w-5 h-5 text-[10px]" data-cmd="bold" title="B"><b>B</b></button>
+                     <button type="button" class="editor-btn w-5 h-5 text-[10px]" data-cmd="italic" title="I"><i>I</i></button>
+                     <button type="button" class="editor-btn w-5 h-5 text-[10px]" data-cmd="underline" title="U"><u>U</u></button>
+                     <div class="w-px h-3 bg-slate-300 mx-0.5 self-center"></div>
+                     <button type="button" class="editor-btn w-5 h-5 text-[10px]" data-cmd="insertUnorderedList" title="Lista">•</button>
+                     <button type="button" class="editor-btn w-5 h-5 text-[10px]" data-cmd="insertOrderedList" title="Num">1.</button>
+                 </div>
+                 <div class="editor-content p-2 text-xs min-h-[60px] max-h-[120px] overflow-y-auto outline-none" contenteditable="true" data-placeholder="Wpisz treść..."></div>
+             </div>
+             
+             <div class="flex gap-2">
+                 <select id="taskPriority" class="w-1/2 p-1.5 border border-slate-300 rounded text-[10px] bg-white outline-none">
+                     <option value="Normalny">Normalny</option>
+                     <option value="Wysoki">Wysoki 🔴</option>
+                     <option value="Niski">Niski 🟢</option>
+                 </select>
+                 <input type="text" id="taskDeadline" class="w-1/2 p-1.5 border border-slate-300 rounded text-[10px] bg-white outline-none" placeholder="Termin" onfocus="(this.type='date')" onblur="(this.type='text')">
+             </div>
+             
+             <div class="flex justify-between items-center pt-1">
+                 <span id="formTitle" class="text-[9px] text-slate-400 font-bold uppercase truncate max-w-[100px]"></span>
+                 <button id="addTaskBtn" class="bg-blue-600 text-white py-1.5 px-4 rounded text-xs font-bold hover:bg-blue-700 transition shadow-sm disabled:opacity-50 flex items-center justify-center gap-1">
+                     <span id="btnText">Dodaj</span>
+                     <div id="btnSpinner" class="loader-btn hidden" style="width:10px;height:10px;border-width:1px;"></div>
+                 </button>
+             </div>
+             <p id="formError" class="text-red-500 text-[10px] text-center hidden"></p>
+        </div>
+    </div>
+  `;
+  const iconNote = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+  const cardNote = createCard('Szybka Notatka', null, 'bg-emerald-500', iconNote, noteContent, true);
+
+  // --- 1. KARTA ROTACJI ---
   let rotationContent = '';
   let totalRotation = 0;
-  
-  // Kolejność wewnątrz "Obsada Dziś"
   const displayOrder = ['stow', 'carts', 'missions', 'support'];
 
   displayOrder.forEach(mode => {
@@ -65,20 +114,12 @@ function renderStowersWidgetUI() {
      if (wData && wData.today && wData.today.length > 0) {
         totalRotation += wData.today.length;
         const conf = config[mode] || { title: mode, color: 'gray', labelColor: 'bg-gray-100 text-gray-700' };
-        
-        let extraLabel = '';
-        if (mode === 'missions') {
-            extraLabel = '<span class="ml-2 text-[9px] text-slate-400 font-normal italic tracking-normal normal-case">(Multi / Nie blokuje)</span>';
-        }
-        
+        let extraLabel = (mode === 'missions') ? '<span class="ml-2 text-[9px] text-slate-400 font-normal italic tracking-normal normal-case">(Kliknij ikonę, by zmienić czas)</span>' : '';
         rotationContent += `
           <div class="mb-4 last:mb-0">
              <div class="flex justify-between items-center mb-2 px-1">
                 <div class="flex items-center">
-                    <span class="text-xs font-bold uppercase tracking-wide ${conf.labelColor} px-2 py-0.5 rounded">
-                    ${conf.title}
-                    </span>
-                    ${extraLabel}
+                    <span class="text-xs font-bold uppercase tracking-wide ${conf.labelColor} px-2 py-0.5 rounded">${conf.title}</span>${extraLabel}
                 </div>
                 <span class="text-xs text-slate-500 font-mono font-bold">${wData.today.length}</span>
              </div>
@@ -87,50 +128,31 @@ function renderStowersWidgetUI() {
         `;
      }
   });
-
-  if (rotationContent === '') {
-     rotationContent = `<div class="h-32 flex items-center justify-center text-sm text-slate-400 italic">Brak przydziałów (oprócz Beauty).</div>`;
-  } else {
-     rotationContent = `<div class="py-2 px-1">${rotationContent}</div>`;
-  }
-  
-  // Ikony
+  if (rotationContent === '') rotationContent = `<div class="h-32 flex items-center justify-center text-sm text-slate-400 italic">Brak przydziałów (oprócz Beauty).</div>`;
+  else rotationContent = `<div class="py-2 px-1">${rotationContent}</div>`;
   const iconRotation = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
-  const iconBeauty = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>`;
-  
   const cardRotation = createCard('Obsada Dziś', totalRotation, 'bg-blue-600', iconRotation, rotationContent);
 
-
-  // --- 2. DEDYKOWANA KARTA BEAUTY Z WERYFIKACJĄ ---
+  // --- 2. KARTA BEAUTY ---
   let beautyContent = '';
-  const beautyAssigned = allWidgets.beauty?.today || []; // Z bazy (już zapisani)
-  const beautyPlan = state.planningData || [];           // Z Planu (do weryfikacji)
+  const beautyAssigned = allWidgets.beauty?.today || []; 
+  const beautyPlan = state.planningData || [];           
   const assignedNames = new Set(beautyAssigned.map(p => p.name.toLowerCase().trim()));
   let missingInDb = [];
   
-  // A. Jeśli mamy Plan - Tryb Weryfikacji
   if (beautyPlan.length > 0) {
       beautyContent += `<div class="p-2 space-y-1">`;
-      
       beautyPlan.forEach(rawName => {
-          // Usuwanie (STOW) jeśli jest w nazwie z planu, ignorujemy też ostrzeżenia
           if (rawName.includes("⚠️")) return;
-
           const cleanName = rawName.replace(" (STOW)", "").trim();
           const isAssigned = assignedNames.has(cleanName.toLowerCase());
-          
           if (isAssigned) {
-              // ZGODA: Jest w planie i w bazie
               beautyContent += `
                   <div class="flex justify-between items-center text-xs p-1.5 bg-emerald-50 border border-emerald-100 rounded opacity-75">
                       <span class="text-emerald-700 font-medium truncate flex-grow">${cleanName}</span>
-                      <span class="flex items-center text-[9px] font-bold text-emerald-600 bg-white px-1.5 py-0.5 rounded border border-emerald-100 ml-2">
-                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                        OK
-                      </span>
+                      <span class="flex items-center text-[9px] font-bold text-emerald-600 bg-white px-1.5 py-0.5 rounded border border-emerald-100 ml-2">OK</span>
                   </div>`;
           } else {
-              // BRAK: Jest w planie, nie ma w bazie
               missingInDb.push(cleanName);
               beautyContent += `
                   <div class="flex justify-between items-center text-xs p-1.5 bg-white border border-amber-200 rounded shadow-sm relative overflow-hidden group">
@@ -140,10 +162,7 @@ function renderStowersWidgetUI() {
                   </div>`;
           }
       });
-      
-      // Dodaj też osoby, które są w bazie, a nie ma ich w planie (dodane ręcznie)
       beautyAssigned.forEach(p => {
-          // Sprawdzamy odwrotnie: czy osoba z bazy jest w planie?
           const isInPlan = beautyPlan.some(pn => pn.replace(" (STOW)", "").trim().toLowerCase() === p.name.toLowerCase().trim());
           if (!isInPlan) {
                beautyContent += `
@@ -154,249 +173,370 @@ function renderStowersWidgetUI() {
                   </div>`;
           }
       });
-
       beautyContent += `</div>`;
-      
-      // PRZYCISK WERYFIKACJI
       if (missingInDb.length > 0) {
-          // Escaping JSON for HTML attribute
           const namesJson = JSON.stringify(missingInDb).replace(/"/g, '&quot;');
-          beautyContent += `
-              <div class="p-2 border-t border-slate-100 bg-slate-50 sticky bottom-0">
-                  <button onclick="handleVerifyAndSaveBeauty(${namesJson})" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3 rounded shadow-sm flex items-center justify-center gap-2 transition-colors animate-pulse">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                      Zapisz Brakujące (${missingInDb.length})
-                  </button>
-                  <p class="text-[9px] text-slate-400 text-center mt-1">Kliknij, aby zatwierdzić plan w systemie.</p>
-              </div>
-          `;
+          beautyContent += `<div class="p-2 border-t border-slate-100 bg-slate-50 sticky bottom-0"><button onclick="handleVerifyAndSaveBeauty(${namesJson})" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3 rounded shadow-sm flex items-center justify-center gap-2 transition-colors animate-pulse">Zapisz Brakujące (${missingInDb.length})</button></div>`;
       } else {
-           // --- NOWOŚĆ V19: Przycisk Anulowania ---
            const planEntriesCount = beautyAssigned.filter(p => p.break === 'Plan').length;
-           
            if (planEntriesCount > 0) {
-                beautyContent += `
-                  <div class="p-2 border-t border-amber-100 bg-amber-50/50 sticky bottom-0">
-                      <button onclick="handleUndoBeautyPlan()" class="w-full bg-white border border-amber-300 text-amber-700 hover:bg-amber-50 text-xs font-bold py-2 px-3 rounded shadow-sm flex items-center justify-center gap-2 transition-colors">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                          Anuluj Plan (${planEntriesCount})
-                      </button>
-                      <p class="text-[9px] text-amber-600/60 text-center mt-1">Usuwa automatyczne wpisy.</p>
-                  </div>
-               `;
-           } else {
-               beautyContent += `
-                  <div class="p-2 text-center border-t border-emerald-100 bg-emerald-50/50">
-                      <span class="text-[10px] text-emerald-600 font-bold flex items-center justify-center gap-1">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        Plan zgodny z systemem
-                      </span>
-                  </div>
-              `;
+                beautyContent += `<div class="p-2 border-t border-amber-100 bg-amber-50/50 sticky bottom-0"><button onclick="handleUndoBeautyPlan()" class="w-full bg-white border border-amber-300 text-amber-700 hover:bg-amber-50 text-xs font-bold py-2 px-3 rounded shadow-sm flex items-center justify-center gap-2 transition-colors">Anuluj Plan (${planEntriesCount})</button></div>`;
            }
       }
-
   } else {
-      // B. Brak Planu - Fallback do listy z bazy
       if (beautyAssigned.length > 0) {
-           beautyContent = `<div class="py-2 px-1">${buildSimpleList(beautyAssigned, true, 'beauty')}</div>
-           <div class="text-[10px] text-slate-400 text-center italic pb-2 pt-2 border-t border-slate-50">Brak planu do weryfikacji.</div>`;
+           beautyContent = `<div class="py-2 px-1">${buildSimpleList(beautyAssigned, true, 'beauty')}</div><div class="text-[10px] text-slate-400 text-center italic pb-2 pt-2 border-t border-slate-50">Brak planu do weryfikacji.</div>`;
       } else {
-           // C. Pusto wszędzie
-           beautyContent = `
-            <div class="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
-                <div class="p-3 bg-fuchsia-50 rounded-full text-fuchsia-300">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                </div>
-                <div>
-                    <p class="text-sm font-bold text-slate-600">Brak Obsady</p>
-                    <p class="text-xs text-slate-400 mt-1">
-                       Oczekiwanie na plan (13:30 / 21:30)<br>lub dodaj ręcznie w trybie Beauty.
-                    </p>
-                </div>
-                <button onclick="setBeautyDay(0, true)" class="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 text-[10px] font-bold rounded hover:bg-slate-50 transition shadow-sm">
-                    Wymuś pobranie planu
-                </button>
-            </div>
-           `;
+           beautyContent = `<div class="h-full flex flex-col items-center justify-center text-center p-6 space-y-3"><div class="p-3 bg-fuchsia-50 rounded-full text-fuchsia-300"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div><p class="text-sm font-bold text-slate-600">Brak Obsady</p><p class="text-xs text-slate-400 mt-1">Oczekiwanie na plan (13:30 / 21:30)</p></div><button onclick="setBeautyDay(0, true)" class="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 text-[10px] font-bold rounded hover:bg-slate-50 transition shadow-sm">Wymuś pobranie</button></div>`;
       }
   }
-  
-  const beautyTitle = `Beauty <span class="text-[10px] font-medium text-fuchsia-100 ml-1 opacity-80">(Plan)</span>`;
-  // Używamy beautyAssigned.length do licznika w nagłówku (stan faktyczny w bazie), ale missing w body
-  const cardBeautyWidget = createCard(beautyTitle, beautyAssigned.length, 'bg-fuchsia-500', iconBeauty, beautyContent, true);
-
+  let beautyDateInfo = `(Dziś ${todayStr})`;
+  let beautyTitleStyle = "text-fuchsia-100 opacity-80";
+  if (state.planningData && state.planningData.length > 0) {
+      const warningItem = state.planningData.find(s => typeof s === 'string' && s.startsWith('⚠️'));
+      if (warningItem) {
+          const dateMatch = warningItem.match(/\d{2}\.\d{2}\.\d{4}/);
+          if (dateMatch) {
+              beautyDateInfo = `⚠️ ${dateMatch[0]}`;
+              beautyTitleStyle = "text-amber-300 font-bold opacity-100";
+          }
+      }
+  }
+  const iconBeauty = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>`;
+  const cardBeautyWidget = createCard(`Beauty <span class="text-[10px] font-medium ${beautyTitleStyle} ml-1">${beautyDateInfo}</span>`, beautyAssigned.length, 'bg-fuchsia-500', iconBeauty, beautyContent, true);
 
   // --- 3. KARTA KALENDARZA ---
   const userGroup = state.settings.userGroup;
   let calendarCard = '';
-  
   if (userGroup) {
       let calendarInnerHtml = '';
       const calData = state.calendarData;
-      
       if (!calData) {
           calendarInnerHtml = `<div class="h-64 flex flex-col items-center justify-center text-slate-400 space-y-2"><div class="loader-sm"></div><span class="text-xs">Ładowanie grafiku...</span></div>`;
-          if (!state.isCalendarFetching) {
-              fetchCalendarData(state.calendarOffset);
-          }
+          if (!state.isCalendarFetching) fetchCalendarData(state.calendarOffset);
       } else {
           calendarInnerHtml = renderCalendarGrid(calData);
       }
-
       const monthLabel = calData ? calData.monthLabel : 'Grafik Pracy';
-      const calendarTitleHtml = `
-          <div class="flex items-center w-full justify-between gap-1">
-              <span class="truncate flex items-center gap-1">Grafik: ${userGroup} <span class="text-[9px] font-normal text-slate-400 bg-slate-100 px-1.5 rounded ml-1 border border-slate-200">${monthLabel}</span></span>
-              <div class="flex items-center gap-1 shrink-0 ml-1">
-                  <button class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-500 hover:text-blue-600 hover:border-blue-200" onclick="changeCalendarMonth(-1)">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                  </button>
-                  <button class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-500 hover:text-blue-600 hover:border-blue-200" onclick="changeCalendarMonth(1)">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                  </button>
-              </div>
-          </div>
-      `;
-      
+      const calendarTitleHtml = `<div class="flex items-center w-full justify-between gap-1"><span class="truncate flex items-center gap-1">Grafik: ${userGroup} <span class="text-[9px] font-normal text-slate-400 bg-slate-100 px-1.5 rounded ml-1 border border-slate-200">${monthLabel}</span></span><div class="flex items-center gap-1 shrink-0 ml-1"><button class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-500 hover:text-blue-600 hover:border-blue-200" onclick="changeCalendarMonth(-1)">◀</button><button class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-500 hover:text-blue-600 hover:border-blue-200" onclick="changeCalendarMonth(1)">▶</button></div></div>`;
       const iconCalendar = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
       calendarCard = createCard(calendarTitleHtml, null, 'bg-violet-500', iconCalendar, `<div class="p-2">${calendarInnerHtml}</div>`, true);
   } else {
-      // Fallback jeśli nie wybrano grupy
-      calendarCard = createCard('Grafik', null, 'bg-slate-400', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/></svg>', 
-          `<div class="p-4 text-center text-slate-400 text-xs">Wybierz grupę w Ustawieniach, aby zobaczyć grafik.</div>`, true);
+      calendarCard = createCard('Grafik', null, 'bg-slate-400', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/></svg>', `<div class="p-4 text-center text-slate-400 text-xs">Wybierz grupę w Ustawieniach, aby zobaczyć grafik.</div>`, true);
   }
 
-  // --- 4. KARTA OSTATNIO ---
-  let targetMode = 'stow';
-  if (state.currentMode && state.currentMode !== 'tasks' && allWidgets[state.currentMode]) {
-     targetMode = state.currentMode;
+  // --- 4. KARTA URLOPY (V6) ---
+  let vacationContent = '';
+  const currentFilterYear = state.vacationFilters.year || new Date().getFullYear();
+  const currentFilterStatus = state.vacationFilters.status || 'ALL';
+  const thisYear = new Date().getFullYear();
+  const years = [thisYear - 1, thisYear, thisYear + 1];
+  const yearOptions = years.map(y => `<option value="${y}" ${y === currentFilterYear ? 'selected' : ''}>${y}</option>`).join('');
+
+  const viewMode = state.vacationViewMode || 'weeks';
+  const isListView = viewMode === 'list';
+  
+  const viewBtns = `
+      <div class="flex bg-slate-100 p-0.5 rounded border border-slate-200">
+          <button onclick="setVacationViewMode('list')" class="px-2 py-0.5 text-[9px] font-bold rounded ${isListView ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'} transition-all" title="Widok Listy">☰</button>
+          <button onclick="setVacationViewMode('weeks')" class="px-2 py-0.5 text-[9px] font-bold rounded ${!isListView ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'} transition-all" title="Widok Tygodni">📅</button>
+      </div>
+  `;
+
+  const statusBtns = [
+      { id: 'ALL', label: 'All' },
+      { id: 'Oczekujący', label: '⏳' },
+      { id: 'Potwierdzony', label: '✔' }
+  ].map(s => {
+      const isActive = currentFilterStatus === s.id;
+      const bg = isActive ? 'bg-sky-100 text-sky-700 border-sky-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50';
+      return `<button onclick="setVacationFilter('status', '${s.id}')" class="px-2 py-1 text-[10px] font-bold border rounded transition-colors ${bg}" title="${s.label}">${s.label}</button>`;
+  }).join('');
+
+  // ZMIANA: Dodano onclick="openVacationModalSmart()" zamiast bezpośredniego openVacationModalUI()
+  vacationContent += `
+      <div class="p-2 bg-slate-50 border-b border-slate-100 flex flex-col gap-2 sticky top-0 z-10">
+          <div class="flex justify-between items-center gap-2">
+              <div class="flex gap-2 items-center">
+                  <select onchange="setVacationFilter('year', this.value)" class="w-16 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded p-1 outline-none focus:border-sky-400">
+                      ${yearOptions}
+                  </select>
+                  ${viewBtns}
+              </div>
+              <div class="flex gap-1">
+                  ${statusBtns}
+              </div>
+          </div>
+          <button onclick="openVacationModalSmart()" class="w-full bg-white hover:bg-sky-50 text-sky-600 text-xs font-bold py-1.5 px-3 rounded border border-sky-200 shadow-sm flex items-center justify-center gap-2 transition-colors">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Zgłoś Urlop
+          </button>
+      </div>
+      <div class="p-2 space-y-2 min-h-[150px] relative bg-slate-50/30">
+  `;
+
+  if (state.isVacationsFetching) {
+      vacationContent += `<div class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-20"><div class="loader-sm mb-2"></div><span class="text-xs text-slate-400">Pobieranie wniosków...</span></div>`;
+  } 
+  else if (!state.isVacationsLoaded) {
+      vacationContent += `<div class="flex flex-col items-center justify-center py-8 text-center"><span class="text-xs text-slate-400 mb-3">Dane urlopowe nie są załadowane.</span><button onclick="fetchVacations(${currentFilterYear})" class="px-3 py-1.5 bg-sky-50 text-sky-600 text-xs font-bold rounded border border-sky-100 hover:bg-sky-100 transition">Pobierz (${currentFilterYear})</button></div>`;
   }
+  else {
+      let rawVacations = state.vacations || [];
+      const currentYearVacations = rawVacations.filter(v => v.startDate.includes(currentFilterYear) || v.endDate.includes(currentFilterYear));
+      const historyVacations = rawVacations.filter(v => !v.startDate.includes(currentFilterYear) && !v.endDate.includes(currentFilterYear));
+
+      let displayVacations = currentYearVacations;
+      if (currentFilterStatus !== 'ALL') displayVacations = displayVacations.filter(v => v.status === currentFilterStatus);
+
+      const getHistorySummary = (empName) => {
+          const hist = historyVacations.filter(h => h.name === empName && h.status === 'Potwierdzony');
+          if (hist.length === 0) return '';
+          
+          let spring = 0, summer = 0, winter = 0;
+          hist.forEach(h => {
+              const d = h.daysCount || 0;
+              if(h.season === 'Luty-Maj') spring += d;
+              else if(h.season === 'Czerwiec-Wrzesień') summer += d;
+              else if(h.season === 'Październik-Styczeń') winter += d;
+          });
+          
+          const total = spring + summer + winter;
+          if (total === 0) return '';
+
+          return `
+              <div class="text-[9px] text-slate-400 mt-1 pt-1 border-t border-slate-50 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
+                  <span class="font-bold text-slate-500">Rok ${currentFilterYear - 1}: ${total}d</span>
+                  ${spring > 0 ? `<span class="text-pink-400" title="Wiosna">🌸${spring}</span>` : ''}
+                  ${summer > 0 ? `<span class="text-orange-400" title="Lato">☀${summer}</span>` : ''}
+                  ${winter > 0 ? `<span class="text-blue-400" title="Zima">❄${winter}</span>` : ''}
+              </div>
+          `;
+      };
+
+      const getScoreColor = (s) => {
+         if (s >= 100) return 'text-emerald-600 bg-emerald-50 border-emerald-200';
+         if (s >= 50) return 'text-sky-600 bg-sky-50 border-sky-200';
+         return 'text-amber-600 bg-amber-50 border-amber-200';
+      };
+      
+      const getScoreTooltip = (v) => {
+        if (v.score === undefined) return 'Punkty Fair Play';
+        let details = `Wynik: ${v.score} pkt\n----------------\nBaza: 100 pkt\n`;
+        const start = new Date(v.startDate);
+        const submit = new Date(v.timestamp);
+        const diffDays = Math.ceil((start - submit) / (86400000));
+        if (diffDays < 7) details += `Last Minute: -20 pkt\n`;
+        else if (diffDays > 0) details += `Wyprzedzenie: +${Math.min(30, Math.floor(diffDays * 0.5))} pkt\n`;
+        if (v.daysCount > 14) details += `Długość >14 dni: -${(v.daysCount - 14) * 2} pkt\n`;
+        if (v.score < 60) details += `\nUwzględniono historię urlopów.`;
+        return details;
+      };
+
+      if (displayVacations.length === 0) {
+          vacationContent += `<div class="text-center text-slate-400 text-xs py-4 italic">Brak wniosków w roku ${currentFilterYear}.</div>`;
+      } 
+      else if (isListView) {
+          // --- WIDOK LISTY ---
+          displayVacations.forEach(v => {
+              const isConfirmed = v.status === 'Potwierdzony';
+              const isRejected = v.status === 'Odrzucony';
+              let statusColor = isConfirmed ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : (isRejected ? 'bg-rose-50 text-rose-400 border-rose-100' : 'bg-slate-100 text-slate-600 border-slate-200');
+              let statusIcon = isConfirmed ? '✔' : (isRejected ? '✕' : '⏳');
+              let opacity = isRejected ? 'opacity-60 grayscale' : '';
+              let seasonBadge = (v.season === 'Luty-Maj') ? 'Wiosna' : ((v.season === 'Czerwiec-Wrzesień') ? 'Lato' : 'Zima');
+              
+              const submitDate = new Date(v.timestamp);
+              const submitStr = `Zgł: ${submitDate.toLocaleDateString('pl-PL', {day:'2-digit', month:'2-digit'})} ${submitDate.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+              const scoreBadge = v.score !== undefined ? `<span class="text-[9px] font-bold ${getScoreColor(v.score)} px-1.5 rounded ml-1 border border-current opacity-80 cursor-help" title="${getScoreTooltip(v)}">${v.score} pkt</span>` : '';
+
+              vacationContent += `
+                  <div class="bg-white border border-slate-200 rounded-lg p-2 shadow-sm hover:shadow-md transition-all relative group ${opacity}">
+                      <div class="flex justify-between items-start mb-1">
+                          <div class="flex items-center gap-1 overflow-hidden">
+                              <span class="font-bold text-slate-700 text-xs truncate">${v.name}</span>
+                              ${scoreBadge}
+                          </div>
+                          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border ${statusColor} shrink-0">${statusIcon} ${v.status}</span>
+                      </div>
+                      <div class="text-xs text-slate-500 mb-1 flex items-center justify-between">
+                          <div class="flex items-center">
+                              <span class="${isRejected ? 'line-through' : ''}">${v.startDate} ➝ ${v.endDate}</span>
+                              ${v.daysCount ? `<span class="ml-2 text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 rounded border border-slate-200">${v.daysCount} dni</span>` : ''}
+                          </div>
+                          <span class="text-[9px] text-slate-300 font-mono ml-2">${submitStr}</span>
+                      </div>
+                      ${getHistorySummary(v.name)}
+                      <div class="flex justify-between items-center mt-1.5 border-t border-slate-50 pt-1.5">
+                          <span class="text-[9px] text-slate-400 bg-slate-100 px-1 rounded">${seasonBadge}</span>
+                          <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              ${(!isConfirmed && !isRejected) ? `<button onclick="handleVacationStatus('${v.id}', 'Potwierdzony')" class="p-1 bg-emerald-50 text-emerald-600 rounded hover:bg-emerald-100" title="Zatwierdź">✔</button><button onclick="handleVacationStatus('${v.id}', 'Odrzucony')" class="p-1 bg-rose-50 text-rose-500 rounded hover:bg-rose-100" title="Odrzuć">✕</button>` : ''}
+                              ${isConfirmed ? `<button onclick="handleVacationStatus('${v.id}', 'Oczekujący')" class="p-1 bg-blue-50 text-blue-500 rounded hover:bg-blue-100 border border-blue-100" title="Cofnij do Oczekujących">↺</button>` : ''}
+                              <button onclick="handleVacationDelete('${v.id}', '${v.name}')" class="p-1 bg-slate-50 text-slate-400 rounded hover:bg-slate-100 hover:text-red-500" title="Usuń">🗑</button>
+                          </div>
+                      </div>
+                  </div>
+              `;
+          });
+      } 
+      else {
+          // --- WIDOK TYGODNIOWY ---
+          const weeksData = (typeof groupVacationsByWeeks === 'function') ? groupVacationsByWeeks(displayVacations) : [];
+          
+          if (weeksData.length === 0) {
+              vacationContent += `<div class="text-center text-slate-400 text-xs py-4 italic">Brak aktywnych urlopów w tym widoku.</div>`;
+          } else {
+              weeksData.forEach(w => {
+                  const count = w.requests.length;
+                  const isCrowded = count > 3;
+                  const headerColor = isCrowded ? 'bg-rose-50 border-rose-100 text-rose-700' : 'bg-slate-100 border-slate-200 text-slate-600';
+                  
+                  vacationContent += `
+                      <div class="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm mb-3">
+                          <div class="px-3 py-1.5 ${headerColor} border-b flex justify-between items-center">
+                              <span class="text-xs font-bold uppercase tracking-wide">Tydzień ${w.week}</span>
+                              <span class="text-[10px] font-bold px-1.5 py-0.5 bg-white rounded border border-slate-200 shadow-sm text-slate-500" title="Liczba osób">${count} os.</span>
+                          </div>
+                          <div class="divide-y divide-slate-50">
+                  `;
+                  
+                  w.requests.forEach((r, idx) => {
+                      const queuePos = idx + 1;
+                      const isConfirmed = r.status === 'Potwierdzony';
+                      const statusDot = isConfirmed ? '<span class="text-emerald-500 text-[9px] mr-1">●</span>' : '<span class="text-amber-400 text-[9px] mr-1">●</span>';
+                      const queueBadge = `<span class="text-[9px] font-mono font-bold text-slate-400 mr-2 w-4 inline-block text-right" title="Pozycja wg punktów">${queuePos}.</span>`;
+                      
+                      const weekData = { label: `Tydzień ${w.week}`, startIso: r.weekStartIso, endIso: r.weekEndIso };
+                      const weekDataJson = JSON.stringify(weekData).replace(/"/g, '&quot;');
+                      
+                      const submitDate = new Date(r.timestamp);
+                      const submitStrShort = `${submitDate.getDate()}.${submitDate.getMonth()+1} ${submitDate.getHours()}:${(submitDate.getMinutes()<10?'0':'') + submitDate.getMinutes()}`;
+                      const scoreBadge = r.score !== undefined ? `<span class="text-[8px] font-bold ${getScoreColor(r.score)} px-1 rounded ml-1 border border-current opacity-80 cursor-help" title="${getScoreTooltip(r)}">${r.score}p</span>` : '';
+
+                      vacationContent += `
+                          <div class="p-2 hover:bg-slate-50 group transition-colors">
+                              <div class="flex justify-between items-center">
+                                  <div class="flex items-center min-w-0 flex-grow">
+                                      ${queueBadge}
+                                      ${statusDot}
+                                      <div class="flex flex-col truncate mr-2">
+                                          <div class="flex items-center gap-1">
+                                              <span class="text-xs font-bold text-slate-700 truncate">${r.name}</span>
+                                              ${scoreBadge}
+                                          </div>
+                                          <div class="flex items-center gap-1">
+                                              <span class="text-[9px] text-slate-400 truncate">${r.localRange || (r.startDate.slice(5) + ' - ' + r.endDate.slice(5))}</span>
+                                              ${r.localDaysCount ? `<span class="text-[9px] font-bold text-slate-500 bg-slate-100 px-1 rounded">${r.localDaysCount}d</span>` : ''}
+                                              <span class="text-[8px] text-slate-300 ml-1">Zgł: ${submitStrShort}</span>
+                                          </div>
+                                      </div>
+                                  </div>
+                                  <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
+                                      ${!isConfirmed ? `<button onclick="handleVacationStatus('${r.id}', 'Potwierdzony', ${weekDataJson})" class="text-[10px] p-1 bg-emerald-50 text-emerald-600 rounded border border-emerald-100 hover:bg-emerald-100" title="Zatwierdź">✔</button>` : ''}
+                                      ${isConfirmed ? `<button onclick="handleVacationStatus('${r.id}', 'Oczekujący')" class="text-[10px] p-1 bg-blue-50 text-blue-500 rounded border border-blue-100 hover:bg-blue-100" title="Cofnij">↺</button>` : ''}
+                                      <button onclick="handleVacationDelete('${r.id}', '${r.name}')" class="text-[10px] p-1 bg-slate-50 text-slate-400 rounded border border-slate-100 hover:text-red-500 hover:bg-red-50" title="Usuń">🗑</button>
+                                  </div>
+                              </div>
+                              ${getHistorySummary(r.name)}
+                          </div>
+                      `;
+                  });
+                  vacationContent += `</div></div>`;
+              });
+          }
+      }
+  }
+  vacationContent += `</div>`;
+  
+  const iconVacation = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20"/><path d="M2 12l5-5"/><path d="M22 12l-5-5"/><circle cx="12" cy="19" r="2"/><path d="M12 17v-5"/></svg>`; 
+  const cardVacations = createCard('Planer Urlopów', (state.vacations ? state.vacations.length : 0), 'bg-sky-500', iconVacation, vacationContent);
+
+  // --- 5. KARTA OSTATNIO & GRUPA ---
+  let targetMode = 'stow';
+  if (state.currentMode && state.currentMode !== 'tasks' && allWidgets[state.currentMode]) targetMode = state.currentMode;
   const recentData = allWidgets[targetMode] || { recent: [], recentDateLabel: '' };
   const recentConf = config[targetMode] || { title: targetMode, color: 'gray' };
-  const recentLabel = recentData.recentDateLabel || 'Brak';
-  const iconRecent = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
   const recentContent = `<div class="py-2 px-1">${buildSimpleList(recentData.recent, false, targetMode)}</div>`;
-  const cardRecent = createCard(`Ostatnio: ${recentConf.title}`, recentLabel, 'bg-slate-500', iconRecent, recentContent);
+  const iconRecent = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+  const cardRecent = createCard(`Ostatnio: ${recentConf.title}`, recentData.recentDateLabel || 'Brak', 'bg-slate-500', iconRecent, recentContent);
 
-  // --- 5. KARTA INFO O GRUPIE ---
+  const groupTitleHtml = `<div class="flex items-center w-full justify-between gap-1"><span class="truncate">Info o Grupie</span><button class="text-[10px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-400 hover:text-blue-600 hover:border-blue-200 ml-1 shrink-0" onclick="if(typeof fetchAllData === 'function') fetchAllData()" title="Odśwież dane grupy"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button></div>`;
+  const iconGroup = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
+  
   const availableStow = groupStats.availableStow || 0;
   const currentStowCount = state.widgets.stow?.today?.length || 0;
   const remainingStow = Math.max(0, availableStow - currentStowCount);
-
   const currentWeek = groupStats.currentWeek || '-';
   const currentShift = groupStats.currentShift || '-';
   const subA = groupStats.subgroups ? groupStats.subgroups.A : { total:0, present:0 };
   const subB = groupStats.subgroups ? groupStats.subgroups.B : { total:0, present:0 };
 
-  const skillStats = {
-      stow: { label: 'STOW', total: 0, present: 0, busy: 0 },
-      pack: { label: 'PACK', total: 0, present: 0, busy: 0 },
-      sort: { label: 'SORT', total: 0, present: 0, busy: 0 },
-      receive: { label: 'RCV', total: 0, present: 0, busy: 0 },
-      unloading: { label: 'UNL', total: 0, present: 0, busy: 0 },
-      carts: { label: 'Carty', total: 0, present: 0, busy: 0 }, 
-      shipping: { label: 'SHIP', total: 0, present: 0, busy: 0 },
-      returns: { label: 'Zwroty', total: 0, present: 0, busy: 0 },
-      quality: { label: 'Jakość', total: 0, present: 0, busy: 0 },
-      beauty: { label: 'Beauty', total: 0, present: 0, busy: 0 }
+  // --- STATYSTYKI KOMPETENCJI (NOWE - POPRAWIONE: TYLKO WOLNI) ---
+  const skillCounts = {
+      stow: 0, pack: 0, sort: 0, receive: 0, unloading: 0,
+      carts: 0, shipping: 0, returns: 0, quality: 0, beauty: 0
   };
 
-  const isBusy = (name) => {
-      const busyModes = ['stow', 'carts', 'support', 'beauty'];
-      for(const mode of busyModes) {
-          if(state.widgets[mode]?.today?.some(e => e.name === name)) return true;
+  // 1. Zbieramy zajętych
+  const assignedSet = new Set();
+  ['stow', 'carts', 'missions', 'support', 'beauty'].forEach(mode => {
+      if (state.widgets[mode] && state.widgets[mode].today) {
+          state.widgets[mode].today.forEach(p => assignedSet.add(p.name));
       }
-      return false;
-  };
+  });
 
-  if (state.employees) {
-      state.employees.forEach(emp => {
-          const busy = isBusy(emp.name);
-          const present = emp.isAtWork;
-          
-          if (emp.skills) {
-              for (const [key, val] of Object.entries(emp.skills)) {
-                  if (skillStats[key] && val) {
-                      skillStats[key].total++;
-                      if (present) {
-                          skillStats[key].present++;
-                          if (busy) skillStats[key].busy++;
-                      }
-                  }
-              }
-          }
-      });
-  }
+  const presentEmployees = state.employees ? state.employees.filter(e => e.isAtWork) : [];
 
-  let skillsRows = '';
-  for (const [key, stat] of Object.entries(skillStats)) {
-      const free = stat.present - stat.busy;
-      const availClass = (free > 0) ? 'font-bold text-slate-700' : 'text-slate-300';
-      
-      skillsRows += `
-          <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-              <td class="py-1.5 px-2 text-[10px] uppercase font-bold text-slate-500 tracking-tight">${stat.label}</td>
-              <td class="py-1.5 px-2 text-center text-xs text-slate-400 border-l border-slate-50">${stat.total}</td>
-              <td class="py-1.5 px-2 text-center text-xs font-medium text-emerald-600 bg-emerald-50/30 border-l border-slate-50">${stat.present}</td>
-              <td class="py-1.5 px-2 text-center text-xs text-amber-600 bg-amber-50/30 border-l border-slate-50">${stat.busy}</td>
-              <td class="py-1.5 px-2 text-center text-xs ${availClass} bg-slate-50/50 border-l border-slate-50">${free}</td>
-          </tr>
-      `;
-  }
+  presentEmployees.forEach(e => {
+      // Jeśli zajęty, pomijamy w liczniku dostępnych
+      if (assignedSet.has(e.name)) return;
 
-  const groupTitleHtml = `
-      <div class="flex items-center w-full justify-between gap-1">
-          <span class="truncate">Info o Grupie</span>
-          <button class="text-[10px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-400 hover:text-blue-600 hover:border-blue-200 ml-1 shrink-0" onclick="if(typeof fetchAllData === 'function') fetchAllData()" title="Odśwież dane grupy">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          </button>
+      if (e.skills) {
+          if (e.skills.stow) skillCounts.stow++;
+          if (e.skills.pack) skillCounts.pack++;
+          if (e.skills.sort) skillCounts.sort++;
+          if (e.skills.receive) skillCounts.receive++;
+          if (e.skills.unloading) skillCounts.unloading++;
+          if (e.skills.carts) skillCounts.carts++;
+          if (e.skills.shipping) skillCounts.shipping++;
+          if (e.skills.returns) skillCounts.returns++;
+          if (e.skills.quality) skillCounts.quality++;
+          if (e.skills.beauty) skillCounts.beauty++;
+      }
+  });
+
+  const badgesHtml = `
+      <div class="flex flex-wrap gap-1 justify-center pt-2 pb-2 border-t border-slate-100">
+          <div class="w-full text-center text-[9px] text-slate-400 font-bold uppercase mb-1">Dostępni (Wolni)</div>
+          ${skillCounts.stow > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200" title="Wolni na Stow">STW: ${skillCounts.stow}</span>` : ''}
+          ${skillCounts.pack > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-700 border border-violet-200" title="Wolni na Pack">PCK: ${skillCounts.pack}</span>` : ''}
+          ${skillCounts.sort > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-200" title="Wolni na Sort">SRT: ${skillCounts.sort}</span>` : ''}
+          ${skillCounts.receive > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-100 text-sky-700 border border-sky-200" title="Wolni na Receive">RCV: ${skillCounts.receive}</span>` : ''}
+          ${skillCounts.unloading > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-stone-100 text-stone-600 border border-stone-200" title="Wolni na Unloading">UNL: ${skillCounts.unloading}</span>` : ''}
+          ${skillCounts.carts > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-200" title="Wolni na Carts">CRT: ${skillCounts.carts}</span>` : ''}
+          ${skillCounts.shipping > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-100 text-teal-700 border border-teal-200" title="Wolni na Shipping">SHP: ${skillCounts.shipping}</span>` : ''}
+          ${skillCounts.returns > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700 border border-rose-200" title="Wolni na Returns">RET: ${skillCounts.returns}</span>` : ''}
+          ${skillCounts.quality > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-100 text-yellow-700 border border-yellow-200" title="Wolni na Quality">Q: ${skillCounts.quality}</span>` : ''}
+          ${skillCounts.beauty > 0 ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-pink-100 text-pink-700 border border-pink-200" title="Wolni na Beauty">B: ${skillCounts.beauty}</span>` : ''}
       </div>
   `;
-  const iconGroup = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
-
-  const groupStatsContent = `
+  
+  const groupStatsContentFull = `
     <div class="p-3 space-y-4">
         <div class="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-lg p-3 shadow-sm">
              <div class="flex flex-col items-start"><span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Tydzień</span><span class="text-lg font-extrabold text-slate-700 leading-none mt-1">${currentWeek}</span></div>
              <div class="h-8 w-px bg-slate-200 mx-2"></div>
              <div class="flex flex-col items-end"><span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Zmiana</span><span class="text-base font-extrabold text-indigo-600 leading-none mt-1">${currentShift}</span></div>
         </div>
-        
-        <div class="grid grid-cols-2 gap-3">
-            <div class="bg-purple-50 p-2 rounded border border-purple-100 text-center">
-                <div class="text-[9px] text-purple-600 uppercase font-bold mb-0.5">Podgrupa A</div>
-                <div class="text-base font-bold text-purple-700" title="Obecni / Wszyscy">${subA.present} <span class="text-purple-400 text-xs font-normal">/ ${subA.total}</span></div>
-            </div>
-            <div class="bg-fuchsia-50 p-2 rounded border border-fuchsia-100 text-center">
-                <div class="text-[9px] text-fuchsia-600 uppercase font-bold mb-0.5">Podgrupa B</div>
-                <div class="text-base font-bold text-fuchsia-700" title="Obecni / Wszyscy">${subB.present} <span class="text-fuchsia-400 text-xs font-normal">/ ${subB.total}</span></div>
-            </div>
-        </div>
-        <div class="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
-            <div class="bg-slate-100 px-3 py-1.5 border-b border-slate-200 flex justify-between items-center">
-                <span class="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Kompetencje</span>
-                <span class="text-[9px] text-slate-400 font-normal">Dostępni dzisiaj</span>
-            </div>
-            <table class="w-full border-collapse">
-                <thead>
-                    <tr class="bg-slate-50 text-[9px] text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                        <th class="py-1 px-2 text-left font-bold w-1/3">Dział</th>
-                        <th class="py-1 px-2 text-center font-normal" title="Wszyscy w bazie">All</th>
-                        <th class="py-1 px-2 text-center font-bold text-emerald-600" title="Obecni w pracy">Ob.</th>
-                        <th class="py-1 px-2 text-center font-bold text-amber-600" title="Przypisani do zadań">Zaj.</th>
-                        <th class="py-1 px-2 text-center font-bold text-slate-700" title="Dostępni (Wolni)">Wol.</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-50">
-                    ${skillsRows}
-                </tbody>
-            </table>
+        <div class="grid grid-cols-2 gap-3 text-center">
+            <div class="bg-purple-50 p-2 rounded border border-purple-100"><div class="text-[9px] text-purple-600 font-bold">A</div><div class="text-sm font-bold text-purple-700">${subA.present}/${subA.total}</div></div>
+            <div class="bg-fuchsia-50 p-2 rounded border border-fuchsia-100"><div class="text-[9px] text-fuchsia-600 font-bold">B</div><div class="text-sm font-bold text-fuchsia-700">${subB.present}/${subB.total}</div></div>
         </div>
         <div class="grid grid-cols-2 gap-3 text-center border-t border-slate-100 pt-3">
-            <div class="bg-blue-50 p-2 rounded border border-blue-100"><div class="text-[10px] text-blue-600 uppercase font-bold mb-0.5">Obecni STOW</div><div class="text-base font-bold text-blue-700" title="Obecni + Szkolenie">${availableStow}</div></div>
-            <div class="bg-indigo-50 p-2 rounded border border-indigo-100"><div class="text-[10px] text-indigo-600 uppercase font-bold mb-0.5">Pozostało STOW</div><div class="text-base font-bold text-indigo-700" title="Do wyznaczenia">${remainingStow}</div></div>
+            <div class="bg-blue-50 p-2 rounded border border-blue-100"><div class="text-[10px] text-blue-600 uppercase font-bold mb-0.5">Obecni STOW</div><div class="text-base font-bold text-blue-700">${availableStow}</div></div>
+            <div class="bg-indigo-50 p-2 rounded border border-indigo-100"><div class="text-[10px] text-indigo-600 uppercase font-bold mb-0.5">Pozostało</div><div class="text-base font-bold text-indigo-700">${remainingStow}</div></div>
         </div>
+        ${badgesHtml}
         <div>
             <div class="text-[11px] font-bold text-slate-400 uppercase mb-2 px-1 border-b pb-1">Plan Tygodniowy</div>
             <ul class="space-y-1.5">
@@ -405,23 +545,46 @@ function renderStowersWidgetUI() {
         </div>
     </div>
   `;
-  const cardGroup = createCard(groupTitleHtml, groupStats.present, 'bg-teal-500', iconGroup, groupStatsContent, true);
+  const cardGroupFull = createCard(groupTitleHtml, groupStats.present, 'bg-teal-500', iconGroup, groupStatsContentFull, true);
 
   const gridClass = 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-start';
 
-  // UKŁAD WIDGETÓW: Obsada -> Ostatnio -> Info -> Beauty -> Grafik
+  // UKŁAD WIDGETÓW (Szybka Notatka jako 3)
   container.innerHTML = `
     <div class="grid ${gridClass} mb-8">
         ${cardRotation}
         ${cardRecent}
-        ${cardGroup}
+        ${cardNote}
+        ${cardGroupFull}
+        ${cardVacations} 
         ${cardBeautyWidget}
         ${calendarCard}
     </div>
   `;
+  
+  if (!state.isVacationsLoaded && !state.isVacationsFetching) {
+      if (typeof fetchVacations === 'function') {
+          fetchVacations(state.vacationFilters.year);
+      }
+  }
+
+  // --- INIT EDITOR AFTER RENDER ---
+  if (window.richEditor) {
+      setTimeout(() => {
+          window.richEditor.init('richEditorWidget');
+          // Podpięcie listenerów, aby przycisk "Dodaj" aktywował się podczas pisania
+          const editorContent = document.querySelector('#richEditorWidget .editor-content');
+          if (editorContent) {
+              editorContent.addEventListener('input', () => { if(typeof updateFormStateUI === 'function') updateFormStateUI(); });
+              editorContent.addEventListener('keyup', () => { if(typeof updateFormStateUI === 'function') updateFormStateUI(); });
+          }
+          // Inicjalizacja stanu formularza
+          if(typeof updateFormStateUI === 'function') updateFormStateUI();
+      }, 100);
+  }
 }
 
-// === LOGIKA KALENDARZA (BEZ ZMIAN) ===
+// === LOGIKA KALENDARZA ===
 window.changeCalendarMonth = function(delta) {
     state.calendarOffset += delta;
     state.calendarData = null; 
@@ -431,18 +594,7 @@ window.changeCalendarMonth = function(delta) {
 function fetchCalendarData(offset) {
     state.isCalendarFetching = true;
     const group = state.settings.userGroup;
-    google.script.run
-        .withSuccessHandler(data => {
-            state.calendarData = data;
-            state.isCalendarFetching = false;
-            renderStowersWidgetUI();
-        })
-        .withFailureHandler(err => {
-            state.calendarData = { error: err.message };
-            state.isCalendarFetching = false;
-            renderStowersWidgetUI();
-        })
-        .getMonthlySchedule(group, offset);
+    google.script.run.withSuccessHandler(data => { state.calendarData = data; state.isCalendarFetching = false; renderStowersWidgetUI(); }).withFailureHandler(err => { state.calendarData = { error: err.message }; state.isCalendarFetching = false; renderStowersWidgetUI(); }).getMonthlySchedule(group, offset);
 }
 
 function renderCalendarGrid(data) {
@@ -490,12 +642,36 @@ function buildSimpleList(list, isToday, mode) {
       const rawName = p.name || "Nieznany";
       const safeName = rawName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
       let extra = '';
-      if (p.break && p.break !== '--' && p.break !== '') extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 mr-1.5 whitespace-nowrap">${p.break}</span>`;
-      if (p.floor && p.floor !== '--' && p.floor !== '') extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 whitespace-nowrap">${p.floor}</span>`;
+      
+      if (mode === 'stow') {
+          if (p.break && p.break !== '--' && p.break !== '') extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 mr-1.5 whitespace-nowrap">${p.break}</span>`;
+          if (p.floor && p.floor !== '--' && p.floor !== '') extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 whitespace-nowrap">${p.floor}</span>`;
+      } 
+      else if (mode === 'missions') {
+          if (p.break) extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 mr-1.5 whitespace-nowrap">${p.break}</span>`;
+          const isFull = (p.floor === 'Full');
+          const icon = isFull ? '🔒' : '⏳'; 
+          const style = isFull ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-500 border-slate-200';
+          const title = isFull ? 'Cały dzień (Blokuje)' : 'Krótka (Nie blokuje)';
+          if (isToday) {
+             extra += `<button onclick="handleMissionDurationToggle('${safeName}')" class="text-[10px] font-bold px-1.5 py-0.5 rounded border mr-1.5 whitespace-nowrap transition hover:opacity-80 ${style}" title="${title} - Kliknij, aby zmienić">${icon}</button>`;
+          } else {
+             extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded border mr-1.5 whitespace-nowrap ${style}" title="${title}">${icon}</span>`;
+          }
+      }
+      else {
+          if (p.break && p.break !== '--' && p.break !== '') extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-50 text-slate-700 border border-slate-200 mr-1.5 whitespace-nowrap">${p.break}</span>`;
+      }
+
       const delBtn = isToday ? `<button class="ml-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all p-1" onclick="handleWidgetDelete('${mode}', '${safeName}')" title="Usuń"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>` : '';
       return `<li class="p-2.5 flex justify-between items-center text-sm hover:bg-slate-50 transition group"><span class="font-medium text-slate-700 truncate mr-2" title="${rawName}">${rawName}</span><div class="flex items-center shrink-0">${extra}${delBtn}</div></li>`;
     }).join('') + `</ul>`;
 }
+
+window.handleMissionDurationToggle = function(name) {
+    const decodedName = name; 
+    google.script.run.withSuccessHandler(res => { if (res.success) { showToast(res.message, 'success'); if (state.widgets && state.widgets.missions && state.widgets.missions.today) { const entry = state.widgets.missions.today.find(p => p.name === decodedName); if (entry) { entry.floor = res.newVal; } } renderStowersWidgetUI(); if (typeof renderUnifiedList === 'function') renderUnifiedList(); } }).withFailureHandler(err => { showToast("Błąd zmiany czasu: " + err.message, 'error'); }).toggleMissionDuration(decodedName);
+};
 
 window.handleWidgetDelete = function(mode, name) {
   const decodedName = name.replace(/\\'/g, "'").replace(/&quot;/g, '"');
@@ -503,5 +679,17 @@ window.handleWidgetDelete = function(mode, name) {
   if (state.widgets[mode]?.today) { state.widgets[mode].today = state.widgets[mode].today.filter(p => p.name !== decodedName); renderStowersWidgetUI(); }
   if (state.currentMode === mode && state.stowData) { const emp = state.stowData.find(e => e.name === decodedName); if (emp) { emp.wasToday = false; if (typeof renderUnifiedList === 'function') renderUnifiedList(); } }
   google.script.run.withSuccessHandler(res => { if (res.success) { if(typeof showToast === 'function') showToast(res.message, 'success'); if (state.currentMode === mode) loadRotationalData(); } else { if(typeof showToast === 'function') showToast(res.message, 'error'); if (state.currentMode === mode) loadRotationalData(); } }).withFailureHandler(err => { if(typeof showToast === 'function') showToast("Błąd: " + err.message, 'error'); if (state.currentMode === mode) loadRotationalData(); }).deleteRotationalEntry(mode, decodedName);
+};
+
+// NOWA FUNKCJA: Smart open vacation modal
+window.openVacationModalSmart = function() {
+    if (state.currentCategory !== 'Dla pracownika') {
+        const btn = document.querySelector('button[data-category="Dla pracownika"]');
+        if (btn && typeof handleCategorySwitch === 'function') {
+            handleCategorySwitch('Dla pracownika', btn);
+            if(typeof showToast === 'function') showToast("Przełączono na wybór pracowników.", "info");
+        }
+    }
+    if (typeof openVacationModalUI === 'function') openVacationModalUI();
 };
 </script>

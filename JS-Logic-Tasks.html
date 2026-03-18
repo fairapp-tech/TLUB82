@@ -2,7 +2,7 @@
 // Plik: JS-Logic-Tasks.html
 // Moduł: Logika Zadań (Dodawanie, Edycja, Usuwanie, Komentarze)
 // Funkcje: handleAddTask, handleCompleteTasks, handleConfirmDelete, etc.
-// Wersja: Announcements Logic Added
+// Wersja: Widget Mode (No Auto-Close)
 
 console.log("Ładowanie modułu Logic Tasks...");
 
@@ -11,8 +11,21 @@ console.log("Ładowanie modułu Logic Tasks...");
 // =====================================================
 
 function handleAddTask(){ 
-    const d = dom.taskDescription ? dom.taskDescription.value.trim() : ''; 
-    if(!d){ showToast("Wpisz treść zadania!", 'error'); return; } 
+    // Pobierz treść z edytora Rich Text lub klasycznego pola (fallback)
+    let d = '';
+    if (window.richEditor && typeof window.richEditor.getContent === 'function') {
+        d = window.richEditor.getContent();
+    } else if (dom.taskDescription) {
+        d = dom.taskDescription.value.trim();
+    }
+
+    // Walidacja pustego pola (ignoruj same znaczniki HTML)
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = d;
+    const cleanText = tempDiv.textContent.trim();
+    const hasImage = d.includes('<img');
+
+    if(!cleanText && !hasImage){ showToast("Wpisz treść zadania!", 'error'); return; } 
     
     let employees = [];
     
@@ -25,13 +38,13 @@ function handleAddTask(){
     } else if (state.currentCategory === 'Na odprawę') {
         employees = ['Odprawa']; 
     } else if (state.currentCategory === 'Ogłoszenia') {
-        employees = ['Ogłoszenia']; // Nowa kategoria
+        employees = ['Ogłoszenia']; 
     } else {
         employees = ['Osobiste']; 
     }
 
     const td = {
-        description: d,
+        description: d, // Przesyłamy HTML
         deadline: dom.taskDeadline ? dom.taskDeadline.value : '',
         priority: dom.taskPriority ? dom.taskPriority.value : 'Normalny',
         category: state.currentCategory,
@@ -53,7 +66,13 @@ function handleAddTask(){
 }
 
 function resetForm() { 
-  if(dom.taskDescription) dom.taskDescription.value = ''; 
+  // Reset edytora
+  if (window.richEditor && typeof window.richEditor.reset === 'function') {
+      window.richEditor.reset();
+  } else if(dom.taskDescription) {
+      dom.taskDescription.value = ''; 
+  }
+
   // clearEmployeeSelection jest w JS-Logic-Shared
   if(typeof clearEmployeeSelection === 'function') clearEmployeeSelection(); 
   updateFormStateUI(); 
@@ -364,29 +383,40 @@ function updateFormStateUI() {
     if (dom.formTitle) {
         if (state.currentCategory === 'Na odprawę') {
             dom.formTitle.textContent = "Notatka na odprawę";
-            dom.formTitle.className = "text-xs font-bold text-indigo-600 uppercase tracking-wide";
-        } else if (state.currentCategory === 'Ogłoszenia') { // NOWE
+            dom.formTitle.className = "text-[9px] font-bold text-indigo-600 uppercase tracking-wide truncate max-w-[100px]";
+        } else if (state.currentCategory === 'Ogłoszenia') { 
             dom.formTitle.textContent = "Dodaj ogłoszenie";
-            dom.formTitle.className = "text-xs font-bold text-teal-600 uppercase tracking-wide";
+            dom.formTitle.className = "text-[9px] font-bold text-teal-600 uppercase tracking-wide truncate max-w-[100px]";
         } else if (state.currentCategory === 'Osobista') {
-            dom.formTitle.textContent = "Notatka osobista / inna";
-            dom.formTitle.className = "text-xs font-bold text-amber-600 uppercase tracking-wide";
+            dom.formTitle.textContent = "Notatka osobista";
+            dom.formTitle.className = "text-[9px] font-bold text-amber-600 uppercase tracking-wide truncate max-w-[100px]";
         } else {
-            dom.formTitle.textContent = `Zaznacz ${state.selectedEmployeeNames.size} pracownik${state.selectedEmployeeNames.size === 1 ? 'a' : 'ów'}`;
-            dom.formTitle.className = "text-xs font-bold text-slate-500 uppercase tracking-wide";
+            dom.formTitle.textContent = `Wybrano: ${state.selectedEmployeeNames.size} os.`;
+            dom.formTitle.className = "text-[9px] font-bold text-slate-500 uppercase tracking-wide truncate max-w-[100px]";
         }
     }
 
-    const hasText = dom.taskDescription && dom.taskDescription.value.trim().length > 0;
+    // Walidacja treści (Rich Text lub Zwykły)
+    let hasText = false;
+    if (window.richEditor && typeof window.richEditor.getContent === 'function') {
+        const html = window.richEditor.getContent();
+        const temp = document.createElement('div');
+        temp.innerHTML = html;
+        // Sprawdź czy jest tekst lub obrazek
+        hasText = temp.textContent.trim().length > 0 || html.includes('<img');
+    } else if (dom.taskDescription) {
+        hasText = dom.taskDescription.value.trim().length > 0;
+    }
+
     let isValid = false;
-    let btnText = "Dodaj Zadanie";
+    let btnText = "Dodaj"; // Skrócony tekst (było "Dodaj Zadanie")
     
     if (isTargetMode) {
-        if (!hasEmployees) btnText = "Wybierz pracownika";
-        else if (!hasText) btnText = "Wpisz treść";
+        if (!hasEmployees) btnText = "Kogo?";
+        else if (!hasText) btnText = "Treść?";
         else isValid = true;
     } else {
-        if (!hasText) btnText = "Wpisz treść";
+        if (!hasText) btnText = "Treść?";
         else isValid = true;
     }
     
@@ -415,4 +445,24 @@ function setFormLoadingStateUI(isLoading) {
         updateFormStateUI(); 
     }
 }
+
+// Inicjalizacja nasłuchu dla edytora (Self-Init)
+document.addEventListener('DOMContentLoaded', () => {
+    // Ponieważ Editor-Content jest tworzony dynamicznie lub istnieje w DOM,
+    // musimy podpiąć się pod jego zdarzenia.
+    // RichEditor (JS-UI-Editor) nie emituje custom eventów globalnie, 
+    // więc podpinamy się bezpośrednio pod div contenteditable.
+    
+    const tryAttach = setInterval(() => {
+        const editorContent = document.querySelector('.editor-content');
+        if (editorContent) {
+            editorContent.addEventListener('input', updateFormStateUI);
+            editorContent.addEventListener('keyup', updateFormStateUI);
+            clearInterval(tryAttach);
+        }
+    }, 500);
+    
+    // Safety clear po 5 sek
+    setTimeout(() => clearInterval(tryAttach), 5000);
+});
 </script>

@@ -1,12 +1,11 @@
 /**
  * Plik: DataRead.gs
- * Wersja: TURBO MODE V15 (Full Day Names)
+ * Wersja: TURBO MODE V24 (External Vacation Source)
  * Zmiany:
- * - getGroupData: Zmieniono etykiety dni tygodnia na pełne nazwy (Poniedziałek, Wtorek, etc.).
- * - Zachowano logikę 'includes' i sztywne wiersze/kolumny.
+ * - getVacations: Przekierowanie do DataVacations.gs (getVacationsExternal).
  */
 
-const PLANNING_CACHE_VERSION = "6.3-Full-Day-Names"; 
+const PLANNING_CACHE_VERSION = "6.6-Date-Warning-Fix"; 
 
 // === POMOCNICZE ===
 function _formatDate(dateObj, format = "dd.MM.yyyy HH:mm") {
@@ -23,10 +22,32 @@ function _getStartOfDay(date) {
     return d;
 }
 
+// === HELPER PARSOWANIA DAT ===
+function _parseAnyDate(cell) {
+    if (cell instanceof Date) return cell;
+    if (!cell || typeof cell !== 'string') return null;
+    const c = cell.trim();
+    if (!c) return null;
+
+    // 1. Format ISO: YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(c)) {
+        return new Date(c);
+    }
+    
+    // 2. Format Polski: DD.MM.YYYY
+    if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(c)) {
+        const parts = c.split('.');
+        return new Date(parts[2], parts[1] - 1, parts[0]);
+    }
+
+    // 3. Format Polski Tekstowy: "20 maj", "1 gru"
+    return parsePolishDate(c);
+}
+
 // === GŁÓWNA FUNKCJA POBIERAJĄCA ===
 function getInitialData() {
   const timer = new Date();
-  console.log("🚀 Start getInitialData (Turbo V15)");
+  console.log("🚀 Start getInitialData (Turbo V24)");
   
   const response = {
     employees: [],
@@ -42,7 +63,7 @@ function getInitialData() {
     },
     settings: null,
     planningData: [],
-    groupStats: null 
+    groupStats: null
   };
 
   try {
@@ -65,9 +86,26 @@ function getInitialData() {
     try { response.tasks = _fetchTasks(ss); } catch(e) { console.error(e); }
 
     // 5. Planowanie
-    response.planningData = _parsePlanningFromCache(cacheData.values, 0) || []; 
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    
+    const isWindow1 = (h === 13 && m >= 30) || (h === 14 && m <= 50);
+    const isWindow2 = (h === 21 && m >= 30 && m <= 50);
 
-    // 6. Statystyki Grupy (Tutaj jest logika planowania)
+    if (isWindow1 || isWindow2) {
+        try {
+            console.log("🕒 Okno czasowe aktywne - pobieranie świeżego planu...");
+            response.planningData = getPlanningData(0, true, ss) || [];
+        } catch(e) {
+            console.error("Błąd pobierania planu w oknie czasowym:", e);
+            response.planningData = _parsePlanningFromCache(cacheData.values, 0) || []; 
+        }
+    } else {
+        response.planningData = _parsePlanningFromCache(cacheData.values, 0) || []; 
+    }
+
+    // 6. Statystyki Grupy
     try {
         response.groupStats = getGroupData(response.employees, response.settings, ss);
     } catch (e) {
@@ -152,6 +190,12 @@ function _fetchRotationalDB(ss) {
     }));
 }
 
+// === ZMODYFIKOWANA FUNKCJA URLOPÓW (EXTERNAL LINK) ===
+function getVacations(year) {
+    // Delegacja do DataVacations.gs
+    return getVacationsExternal(year);
+}
+
 function _processWidgetsFromDB(rows) {
     const widgets = {
         stow: { today: [], recent: [], recentDateLabel: '' },
@@ -163,7 +207,6 @@ function _processWidgetsFromDB(rows) {
 
     const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
     
-    // 1. Dziś
     rows.forEach(row => {
         if (!row.date || !row.mode || !widgets[row.mode]) return;
         let dStr = "";
@@ -173,7 +216,6 @@ function _processWidgetsFromDB(rows) {
         }
     });
 
-    // 2. Ostatnio
     for (let i = rows.length - 1; i >= 0; i--) {
         const row = rows[i];
         if (!row.date || !row.mode || !widgets[row.mode]) continue;
@@ -305,11 +347,20 @@ function getRotationalData(mode) {
     return employees.filter(emp => {
         let trainingCondition = true;
         if (mode === 'stow') trainingCondition = emp.hasStowTraining;
-        return emp.isAtWork && trainingCondition;
+        return trainingCondition;
     }).map(emp => {
         const s = stats[emp.name] || { week: 0, month: 0, year: 0, lastDate: 0 };
         return {
-            name: emp.name, weekCount: s.week, monthCount: s.month, yearCount: s.year, lastDate: s.lastDate, wasToday: s.lastDate === todayTime, isExcluded: excludedSet.has(emp.name), skills: emp.skills, subgroup: emp.subgroup
+            name: emp.name,
+            weekCount: s.week,
+            monthCount: s.month,
+            yearCount: s.year,
+            lastDate: s.lastDate,
+            wasToday: s.lastDate === todayTime,
+            isExcluded: excludedSet.has(emp.name),
+            skills: emp.skills,
+            subgroup: emp.subgroup,
+            isAtWork: emp.isAtWork
         };
     }).sort((a, b) => a.lastDate - b.lastDate);
 }
@@ -334,18 +385,25 @@ function getPlanningData(dayOffset = 0, forceUpdate = false, existingSS = null) 
         const dateCell = planningSheet.getRange("G2").getValue();
         let sheetDateStr = "";
         if (dateCell) sheetDateStr = (Object.prototype.toString.call(dateCell) === '[object Date]') ? Utilities.formatDate(dateCell, Session.getScriptTimeZone(), "dd.MM.yyyy") : String(dateCell);
-        if (sheetDateStr !== targetDateStr) return ["⚠️ Data w planie nie pasuje do wybranego dnia."];
+        
+        const resultList = [];
+        if (sheetDateStr !== targetDateStr) {
+             resultList.push(`⚠️ Data w planie (${sheetDateStr}) nie pasuje do wybranego dnia (${targetDateStr}).`);
+        }
+        
         const rangeCage = planningSheet.getRange("H3:H5").getValues().flat();
         const stowList = rangeCage.map(String).map(n => n.trim()).filter(n => n !== "").map(n => n + " (STOW)");
         const rangeMain = planningSheet.getRange("F3:F29").getValues().flat();
         const mainList = rangeMain.map(String).map(n => n.trim()).filter(n => n !== "");
         const sheetNames = [...stowList, ...mainList];
-        try { if (typeof savePlanningToCache === 'function') savePlanningToCache(targetDateStr, sheetNames); } catch(e) {}
-        return sheetNames;
+        
+        sheetNames.forEach(n => resultList.push(n));
+
+        try { if (typeof savePlanningToCache === 'function') savePlanningToCache(targetDateStr, resultList); } catch(e) {}
+        return resultList;
     } catch (e) { return ["⚠️ Błąd systemu."]; }
 }
 
-// === ZMODYFIKOWANA FUNKCJA GETGROUPDATA (FIXED ROWS LOGIC + HARDCODED TARGETS + FULL DAYS) ===
 function getGroupData(employeesList, settings, ss) {
     if (!ss) ss = SpreadsheetApp.openById(MAIN_SHEET_ID);
     
@@ -378,7 +436,6 @@ function getGroupData(employeesList, settings, ss) {
     const plan = [];
 
     if (sheet) {
-        // --- NOWA LOGIKA: SZTYWNE WIERSZE I KOLUMNY + HARDCODED TARGETS ---
         const rangeValues = sheet.getRange("J1:S50").getValues();
         
         const dayRanges = [
@@ -391,14 +448,10 @@ function getGroupData(employeesList, settings, ss) {
             { label: "Niedziela",  start: 45, end: 49 }
         ];
 
-        // 1. Zbuduj listę celów (dynamiczną z HR + sztywną z polecenia)
         const targetPhrases = new Set();
-        
-        // A) Sztywne cele (Hardcoded)
         targetPhrases.add("UB8");
-        targetPhrases.add("MATEUSZ 634"); // <-- DODANO ZGODNIE Z ŻĄDANIEM
+        targetPhrases.add("MATEUSZ 634"); 
 
-        // B) Dynamiczne cele (Pracownicy)
         employeesList.forEach(e => {
             if (e.name) targetPhrases.add(e.name.trim().toUpperCase());
         });
@@ -407,14 +460,10 @@ function getGroupData(employeesList, settings, ss) {
 
         dayRanges.forEach(d => {
             const locations = new Set();
-            
             for (let r = d.start; r <= d.end; r++) {
-                const rowIndex = r - 1; // Array 0-based index
+                const rowIndex = r - 1; 
                 if (rowIndex >= rangeValues.length) break;
-
                 const row = rangeValues[rowIndex];
-
-                // STREFA LEWA: K, L, M -> J
                 const leftTexts = [String(row[1]), String(row[2]), String(row[3])];
                 for (const text of leftTexts) {
                     const cleanText = text.trim().toUpperCase();
@@ -426,8 +475,6 @@ function getGroupData(employeesList, settings, ss) {
                         }
                     }
                 }
-
-                // STREFA PRAWA: Q, R, S -> P
                 const rightTexts = [String(row[7]), String(row[8]), String(row[9])];
                 for (const text of rightTexts) {
                     const cleanText = text.trim().toUpperCase();
@@ -440,7 +487,6 @@ function getGroupData(employeesList, settings, ss) {
                     }
                 }
             }
-
             if (locations.size > 0) {
                 const locArray = Array.from(locations).sort();
                 plan.push({ day: d.label, info: locArray.join(', ') });
@@ -451,7 +497,6 @@ function getGroupData(employeesList, settings, ss) {
     return { total, present, trained, availableStow, plan, currentWeek, currentShift, subgroups: subStats };
 }
 
-// === GRAFIK ===
 function getShiftForGroup(group, ss) {
     if(!ss) ss = SpreadsheetApp.openById(MAIN_SHEET_ID);
     const sheet = ss.getSheetByName(grafikSheetName); 
@@ -464,18 +509,27 @@ function getShiftForGroup(group, ss) {
     const lastRow = sheet.getLastRow();
     const data = sheet.getRange(structure.firstDataRow, structure.dateColIdx+1, lastRow - structure.firstDataRow + 1, 20).getValues();
     const relDate = 0; const relShift = structure.shiftColIdx - structure.dateColIdx; const relGroup = targetGroupIdx - structure.dateColIdx;
+    
     let lastDateStr = null;
+    
     for (let i = 0; i < data.length; i++) {
         const cell = data[i][relDate];
-        if (cell) {
-             if (cell instanceof Date) lastDateStr = Utilities.formatDate(cell, Session.getScriptTimeZone(), "yyyy-MM-dd");
-             else if(typeof cell==='string' && cell.trim()) { const p = parsePolishDate(cell); lastDateStr = p ? Utilities.formatDate(p, Session.getScriptTimeZone(), "yyyy-MM-dd") : cell.trim().split('T')[0]; }
+        const parsed = _parseAnyDate(cell); 
+        
+        if (parsed) {
+             lastDateStr = Utilities.formatDate(parsed, Session.getScriptTimeZone(), "yyyy-MM-dd");
         }
+        
         if (lastDateStr === todayStr) {
             const rawVal = String(data[i][relGroup]).trim().toUpperCase();
-            if (rawVal && rawVal !== "") return "Zmiana " + data[i][relShift]; 
-            const nextRowDate = (i+1 < data.length) ? data[i+1][relDate] : "END";
-            if ((nextRowDate && String(nextRowDate).trim() !== "") || i+1 >= data.length) return "Wolne";
+            if (rawVal && rawVal !== "") {
+                 let shiftVal = String(data[i][relShift]).trim();
+                 if(!shiftVal) shiftVal = "1";
+                 return "Zmiana " + shiftVal; 
+            }
+            const nextRowDateCell = (i+1 < data.length) ? data[i+1][relDate] : "END";
+            const nextParsed = _parseAnyDate(nextRowDateCell);
+            if (nextParsed || i+1 >= data.length) return "Wolne";
         }
     }
     return null;
@@ -487,39 +541,66 @@ function getMonthlySchedule(group, monthOffset = 0) {
     if (!sheet) return { error: "Brak arkusza Grafik" };
     const structure = _detectScheduleStructure(sheet);
     if (!structure) return { error: "Nie wykryto struktury." };
+    
     const groupOffset = { 'A':0, 'B':1, 'C':2, 'D':3, 'E':4, 'F':5, 'G':6, 'H':7 };
     const targetGroupIdx = structure.groupStartIdx + groupOffset[group];
-    const targetDate = new Date(); targetDate.setDate(1); targetDate.setMonth(targetDate.getMonth() + monthOffset);
-    const targetMonth = targetDate.getMonth(); const targetYear = targetDate.getFullYear();
+    
+    const targetDate = new Date(); 
+    targetDate.setDate(1); 
+    targetDate.setMonth(targetDate.getMonth() + monthOffset);
+    
+    const targetMonth = targetDate.getMonth(); 
+    const targetYear = targetDate.getFullYear();
     const monthLabel = Utilities.formatDate(targetDate, Session.getScriptTimeZone(), "MMMM yyyy");
-    const startDayOfWeek = (targetDate.getDay() + 6) % 7; 
+    
     const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-    const daysMap = {}; for (let d = 1; d <= daysInMonth; d++) daysMap[d] = "Wolne";
+    const daysMap = {}; 
+    for (let d = 1; d <= daysInMonth; d++) daysMap[d] = "Wolne";
+    
     const lastRow = sheet.getLastRow();
     const data = sheet.getRange(structure.firstDataRow, structure.dateColIdx+1, lastRow - structure.firstDataRow + 1, 20).getValues();
-    const relDate = 0; const relShift = structure.shiftColIdx - structure.dateColIdx; const relGroup = targetGroupIdx - structure.dateColIdx;
+    const relDate = 0; 
+    const relShift = structure.shiftColIdx - structure.dateColIdx; 
+    const relGroup = targetGroupIdx - structure.dateColIdx;
+    
     let lastValid = null;
+    
     for(let i=0; i<data.length; i++) {
         const cell = data[i][relDate];
-        if(cell) {
-            if(cell instanceof Date) lastValid = cell;
-            else if(typeof cell==='string' && cell.trim()){ let p = parsePolishDate(cell); if(p) { if(p.getMonth()===targetMonth) { p.setFullYear(targetYear); lastValid = p; } else lastValid=p; } else try{ lastValid=new Date(cell.split('T')[0]); }catch(e){} }
+        const parsed = _parseAnyDate(cell); 
+        
+        if(parsed) {
+            if (parsed.getFullYear() === new Date().getFullYear() && parsed.getMonth() === targetMonth && targetYear !== parsed.getFullYear()) {
+                 parsed.setFullYear(targetYear);
+            }
+            lastValid = parsed;
         }
+        
         if(!lastValid || lastValid.getMonth() !== targetMonth || lastValid.getFullYear() !== targetYear) continue;
+        
         const val = String(data[i][relGroup]).trim();
         if(val && val !== "") { 
-            daysMap[lastValid.getDate()] = "Zmiana " + String(data[i][relShift]).trim();
+            let shiftVal = String(data[i][relShift]).trim();
+            if(!shiftVal) shiftVal = "1";
+            daysMap[lastValid.getDate()] = "Zmiana " + shiftVal;
         }
     }
-    const finalDays = []; for(let d=1; d<=daysInMonth; d++) finalDays.push({day:d, shift:daysMap[d]});
+    
+    const finalDays = []; 
+    for(let d=1; d<=daysInMonth; d++) finalDays.push({day:d, shift:daysMap[d]});
+    
+    const startDayOfWeek = (new Date(targetYear, targetMonth, 1).getDay() + 6) % 7; 
+    
     return { monthLabel, days: finalDays, startDayOfWeek };
 }
 
 function parsePolishDate(dateStr) {
     if (!dateStr || typeof dateStr !== 'string') return null;
     const months = {'sty':0,'lut':1,'mar':2,'kwi':3,'maj':4,'cze':5,'lip':6,'sie':7,'wrz':8,'paź':9,'paz':9,'lis':10,'gru':11};
-    const match = dateStr.trim().toLowerCase().match(/^(\d{1,2})\s+([a-ząśżźćńółę]{3,})/);
-    if(match && months[match[2].substring(0,3)] !== undefined) return new Date(new Date().getFullYear(), months[match[2].substring(0,3)], parseInt(match[1]));
+    const match = dateStr.trim().toLowerCase().match(/^(\d{1,2})\s*([a-ząśżźćńółę]{3,})/);
+    if(match && months[match[2].substring(0,3)] !== undefined) {
+        return new Date(new Date().getFullYear(), months[match[2].substring(0,3)], parseInt(match[1]));
+    }
     return null;
 }
 
@@ -529,12 +610,7 @@ function _detectScheduleStructure(sheet) {
     for (let r = 0; r < values.length; r++) {
         for (let c = 0; c < values[r].length; c++) {
             const cell = values[r][c];
-            let isDate = false;
-            if (cell instanceof Date) isDate = true;
-            else if (typeof cell === 'string') {
-                if (/^\d{4}-\d{2}-\d{2}$/.test(cell.trim()) || /^\d{2}\.\d{2}\.\d{4}$/.test(cell.trim()) || parsePolishDate(cell)) isDate = true;
-            }
-            if (isDate) {
+            if (_parseAnyDate(cell)) {
                  if (c+2 < values[r].length) {
                      const s = values[r][c+2];
                      if([1,2,3,'1','2','3'].includes(s)) return { firstDataRow: r+1, dateColIdx: c, shiftColIdx: c+2, groupStartIdx: c+3 };
@@ -547,10 +623,10 @@ function _detectScheduleStructure(sheet) {
 
 function triggerAutoUpdate() {
    const now = new Date();
-   const weekNum = getWeekNumber(now);
-   const day = now.getDay(); const hour = now.getHours(); const minute = now.getMinutes();
-   let isMorning = (weekNum%2===0) ? (day!==0) : false;
-   if ((isMorning && hour===13 && minute>=30 && minute<=50) || (!isMorning && hour===21 && minute>=30 && minute<=50)) {
+   const hour = now.getHours(); const minute = now.getMinutes();
+   const isWindow1 = (hour === 13 && minute >= 30) || (hour === 14 && minute <= 50);
+   const isWindow2 = (hour === 21 && minute >= 30 && minute <= 50);
+   if (isWindow1 || isWindow2) {
        try { getPlanningData(1, true); } catch(e) {}
    }
 }

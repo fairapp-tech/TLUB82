@@ -1,8 +1,8 @@
 <script>
 // Plik: JS-Logic-Rotational.html
 // Moduł: Logika Rotacyjna (Auto-Wybór, Zapis, Wykluczenia)
-// Funkcje: handleRotationalAutoSelect, handleRotationalSubmit, handleToggleExclusion
-// Wersja: Persistent Selection + Skills Matrix Filtering
+// Funkcje: handleRotationalAutoSelect, handleRotationalSubmit, handleToggleExclusion, handleVerifyAndSaveBeauty, handleUndoBeautyPlan
+// Wersja: Turbo V33 (Missions Duration Fixed Logic)
 
 console.log("Ładowanie modułu Logic Rotational...");
 
@@ -21,6 +21,7 @@ function handleRotationalAutoSelect() {
   let batchFloor = null;
   let batchBreak = null;
   let batchRole = null; 
+  let batchDuration = ''; // Dla misji ('' = Krótka, 'Full' = Cały dzień)
   
   const mode = state.currentMode;
 
@@ -33,7 +34,20 @@ function handleRotationalAutoSelect() {
      }
      batchBreak = dom.stowBatchBreak ? dom.stowBatchBreak.value : '';
   } 
-  else if (mode === 'missions' || mode === 'support') {
+  else if (mode === 'missions') {
+     batchRole = dom.batchRoleSelect ? dom.batchRoleSelect.value : '';
+     if (!batchRole || batchRole === "") {
+        showToast("Wybierz rolę dla grupy.", 'error');
+        return;
+     }
+     
+     // Pobieramy opcję czasu trwania bezpośrednio z elementu UI
+     const durationEl = document.getElementById('batchDurationSelect');
+     if (durationEl) {
+         batchDuration = durationEl.value;
+     }
+  }
+  else if (mode === 'support') {
      batchRole = dom.batchRoleSelect ? dom.batchRoleSelect.value : '';
      if (!batchRole || batchRole === "") {
         showToast("Wybierz rolę dla grupy.", 'error');
@@ -103,7 +117,7 @@ function handleRotationalAutoSelect() {
 
     const checkbox = row.querySelector('.stow-checkbox');
     const paramInput1 = row.querySelector('.assignment-param-1'); // Przerwa / Rola
-    const paramInput2 = row.querySelector('.assignment-param-2'); // Piętro
+    const paramInput2 = row.querySelector('.assignment-param-2'); // Piętro / Czas trwania
     
     // Jeśli pracownik nie jest wykluczony (checkbox enabled)
     if (checkbox && !checkbox.disabled) {
@@ -128,7 +142,7 @@ function handleRotationalAutoSelect() {
        
        // 2. Przygotuj wartości
        let val1 = ''; // Break / Role
-       let val2 = ''; // Floor
+       let val2 = ''; // Floor / Duration
 
        if (mode === 'stow') {
           val2 = batchFloor;
@@ -137,7 +151,14 @@ function handleRotationalAutoSelect() {
           if (paramInput2) paramInput2.value = batchFloor; 
           if (paramInput1) paramInput1.value = batchBreak; 
        } 
-       else if (mode === 'missions' || mode === 'support') {
+       else if (mode === 'missions') {
+          val1 = batchRole;
+          val2 = batchDuration; // '' lub 'Full'
+          
+          if (paramInput1) paramInput1.value = batchRole;
+          if (paramInput2) paramInput2.value = batchDuration;
+       }
+       else if (mode === 'support') {
           val1 = batchRole;
           if (paramInput1) paramInput1.value = batchRole;
        }
@@ -160,6 +181,10 @@ function handleRotationalAutoSelect() {
       }
   } else {
       let msg = `Auto: zaznaczono ${selectedCount} osób.`;
+      
+      if (mode === 'missions') {
+          msg += (batchDuration === 'Full') ? ` (Cały dzień).` : ` (Krótka).`;
+      }
       
       if (skippedSkillCount > 0) msg += ` (Brak szkolenia: ${skippedSkillCount}).`;
       if (skippedCollisionCount > 0) msg += ` (Zajęci: ${skippedCollisionCount}).`;
@@ -186,7 +211,7 @@ function handleRotationalSubmit() {
   
   state.pendingAssignments.forEach((data, name) => {
       let val1 = data.break || '';
-      let val2 = data.floor || '';
+      let val2 = data.floor || ''; // W Misjach to czas trwania ('Full' lub '')
       
       if (mode === 'stow') {
          if (val1 === '--' || val1 === '') val1 = 'Gr';
@@ -255,5 +280,74 @@ function handleToggleExclusion(name) {
   google.script.run
     .withFailureHandler(e => showToast("Błąd wykluczania: " + e.message, 'error'))
     .toggleExclusion(decodedName, currentMode);
+}
+
+// 4. WERYFIKACJA BEAUTY (ZAPIS Z PLANU)
+function handleVerifyAndSaveBeauty(missingNames) {
+    if (!missingNames || missingNames.length === 0) return;
+    
+    let confirmMsg = `Czy na pewno chcesz zapisać ${missingNames.length} osób z planu do systemu Beauty?`;
+    
+    if (state.planningData && state.planningData.length > 0) {
+        const warning = state.planningData.find(item => item.startsWith("⚠️"));
+        if (warning) {
+            confirmMsg = warning + "\n\n" + confirmMsg + "\n(Zalecana ostrożność!)";
+        }
+    }
+
+    if (!confirm(confirmMsg)) return;
+    
+    const assignments = missingNames.map(name => ({
+        name: name,
+        break: 'Plan',
+        floor: ''
+    }));
+    
+    google.script.run
+        .withSuccessHandler(res => {
+            showToast("Zapisano osoby z planu Beauty.", 'success');
+            
+            if (state.widgets && state.widgets.beauty) {
+                if (!state.widgets.beauty.today) state.widgets.beauty.today = [];
+                assignments.forEach(a => {
+                    state.widgets.beauty.today.push(a);
+                });
+            }
+            
+            if (typeof renderStowersWidgetUI === 'function') renderStowersWidgetUI();
+            if (typeof renderUnifiedList === 'function') renderUnifiedList();
+
+            if (typeof loadRotationalData === 'function') {
+                loadRotationalData();
+            }
+        })
+        .withFailureHandler(err => {
+            showToast("Błąd zapisu planu: " + err.message, 'error');
+        })
+        .processRotationalAssignments('beauty', assignments);
+}
+
+// 5. ANULOWANIE PLANU BEAUTY
+function handleUndoBeautyPlan() {
+    if (!confirm("Czy na pewno chcesz cofnąć zatwierdzenie planu? Usunięte zostaną tylko wpisy automatyczne.")) return;
+    
+    google.script.run
+        .withSuccessHandler(res => {
+            if(res.success) {
+                showToast(res.message, "success");
+                
+                if (state.widgets && state.widgets.beauty && state.widgets.beauty.today) {
+                    state.widgets.beauty.today = state.widgets.beauty.today.filter(p => p.break !== 'Plan');
+                }
+                
+                if (typeof renderStowersWidgetUI === 'function') renderStowersWidgetUI();
+                if (typeof renderUnifiedList === 'function') renderUnifiedList();
+                if (typeof loadRotationalData === 'function') loadRotationalData();
+            } else {
+                showToast(res.message, "error");
+            }
+        })
+        .withFailureHandler(err => showToast("Błąd anulowania: " + err.message, "error"))
+        .deleteBeautyPlanEntries();
 }
 </script>

@@ -1,12 +1,24 @@
 <script>
 // Plik: JS-UI-Modals.html
 // Moduł: Obsługa Modali (Usuwanie, Edycja, Historia, Ustawienia, Kolizje, Import Grafiku)
-// Wersja: User Group & Schedule Import Support
+// Wersja: Cleaned (Task Modal Removed)
 
 console.log("Ładowanie modułu UI Modals...");
 
+// === AUTO-MAPOWANIE NOWYCH ELEMENTÓW DOM (Dla bezpieczeństwa) ===
+// Uzupełniamy obiekt dom o nowe ID, jeśli nie zostały zdefiniowane w JS-State
+document.addEventListener('DOMContentLoaded', () => {
+    // Usunięto ID związane z modalem dodawania zadań
+    const newIds = []; 
+    newIds.forEach(id => {
+        if (typeof dom !== 'undefined' && !dom[id]) {
+            dom[id] = document.getElementById(id);
+        }
+    });
+});
+
 // =====================================================
-// === MODAL KOLIZJI (NOWE) ===
+// === MODAL KOLIZJI ===
 // =====================================================
 
 function openCollisionModalUI(name, collisionInfo, checkbox) {

@@ -1,7 +1,7 @@
 <script>
 // Plik: JS-UI-List.html
 // Moduł: Renderowanie Listy Pracowników
-// Wersja: Smart Cache Fallback UI (Banners & Blocking)
+// Wersja: Turbo V29 (Absent Employees Support in Rotation)
 
 console.log("Ładowanie modułu UI List...");
 
@@ -12,37 +12,36 @@ console.log("Ładowanie modułu UI List...");
 function findActiveAssignment(employeeName) {
     if (!state.widgets) return null;
     
-    const modes = ['stow', 'carts', 'support', 'beauty'];
+    // Dodano 'missions' do listy sprawdzanej (ale z warunkiem w pętli)
+    const modes = ['stow', 'carts', 'support', 'beauty', 'missions'];
     const activeAssignments = [];
 
-    // 1. Sprawdź aktywne widgety
+    // 1. Sprawdź aktywne widgety (Tylko ZATWIERDZONE dane)
     for (let i = 0; i < modes.length; i++) {
         const mode = modes[i];
         if (mode === state.currentMode) continue;
 
         const data = state.widgets[mode];
         if (data && data.today && Array.isArray(data.today)) {
-            const isAssigned = data.today.some(function(p) { return p.name === employeeName; });
-            if (isAssigned) {
+            // Szukamy przypisania danego pracownika
+            const assignment = data.today.find(function(p) { return p.name === employeeName; });
+            
+            if (assignment) {
+                // Specjalna logika dla Misji:
+                // Blokuj TYLKO jeśli misja jest "Cały dzień" (parametr floor === 'Full')
+                if (mode === 'missions') {
+                    if (assignment.floor !== 'Full') continue; 
+                }
+
                 let label = mode;
                 if(mode === 'stow') label = 'STOW';
                 if(mode === 'carts') label = 'Carty';
                 if(mode === 'support') label = 'Wsparcie';
                 if(mode === 'beauty') label = 'Beauty';
+                if(mode === 'missions') label = 'Misja (Full)'; // Oznaczenie blokady
+                
                 activeAssignments.push(label);
             }
-        }
-    }
-
-    // 2. Sprawdź Planowanie Zewnętrzne
-    if (state.planningData && Array.isArray(state.planningData)) {
-        const found = state.planningData.some(function(pName) {
-            const clean = pName.replace(" (STOW)", "").trim();
-            return clean === employeeName;
-        });
-        
-        if (found && !activeAssignments.includes('Beauty')) {
-            activeAssignments.push('Beauty (Plan)');
         }
     }
 
@@ -173,6 +172,9 @@ function renderUnifiedList() {
         data.forEach(function(e) { e._collision = findActiveAssignment(e.name); });
         
         data.sort(function(a, b) {
+            // Najpierw obecni, potem nieobecni
+            if (a.isAtWork !== b.isAtWork) return (b.isAtWork ? 1 : 0) - (a.isAtWork ? 1 : 0);
+            
             if (a.isExcluded !== b.isExcluded) return (a.isExcluded ? 1 : 0) - (b.isExcluded ? 1 : 0);
             if (a.wasToday !== b.wasToday) return (a.wasToday ? 1 : 0) - (b.wasToday ? 1 : 0);
             
@@ -244,7 +246,7 @@ function renderUnifiedList() {
         if (isSelected) {
             rowBg = 'bg-blue-50'; 
         } 
-        else if (mode !== 'tasks' && !emp.wasToday && !emp.isExcluded) {
+        else if (mode !== 'tasks' && !emp.wasToday && !emp.isExcluded && emp.isAtWork) { // Dodano isAtWork
             if (recentNamesSet.has(cleanName)) {
                 rowBg = 'bg-rose-50'; 
                 rowTitle = 'Ostatnio: ' + (recentDateLabel || 'Wcześniej');
@@ -264,7 +266,18 @@ function renderUnifiedList() {
             let baseClass = '';
             let hoverClass = '';
 
-            if (emp.isExcluded) {
+            // --- NOWA OBSŁUGA NIEOBECNOŚCI W ROTACJI ---
+            if (emp.isAtWork === false) { // Jeśli explicitly false
+                rowBg = 'bg-red-50 opacity-75';
+                textColor = 'text-red-400 italic';
+                isDisabled = true;
+                rowTitle = "Pracownik nieobecny";
+                baseIcon = SVG_OFFLINE;
+                hoverIcon = SVG_BAN; 
+                baseClass = 'text-red-400';
+                hoverClass = 'text-red-500';
+            }
+            else if (emp.isExcluded) {
                 rowBg = 'bg-slate-50 opacity-60';
                 textColor = 'text-slate-400 line-through';
                 isDisabled = true;
@@ -374,7 +387,33 @@ function renderUnifiedList() {
                 controls = historyBtn + statsBlock + 
                            `<input type="checkbox" class="ml-2 h-4 w-4 rounded text-blue-600 stow-checkbox cursor-pointer" ${isDisabled ? 'disabled' : ''} ${isSelected ? 'checked' : ''}>`;
              }
+             // --- ZMIANA: ROZDZIELENIE MISJI ---
+             else if (mode === 'missions') {
+                const roles = (state.settings && state.settings.customRoles && state.settings.customRoles[mode]) || [];
+                let roleOpts = `<option ${!savedParams ? 'selected' : ''} disabled>Rodzaj...</option>`;
+                roles.forEach(r => { roleOpts += `<option>${r}</option>`; });
+                
+                // Drugi select dla czasu trwania (param2)
+                const durationOpts = `
+                    <option value="" ${(!savedParams || !savedParams.floor) ? 'selected' : ''}>⏳ Krótka</option>
+                    <option value="Full" ${(savedParams && savedParams.floor === 'Full') ? 'selected' : ''}>🔒 Cały dzień</option>
+                `;
+
+                controls = historyBtn + statsBlock + 
+                           buildSelect(roleOpts, savedParams ? savedParams.break : null, 1) + 
+                           '<div class="w-1"></div>' + 
+                           `<select class="border border-slate-300 rounded text-[10px] h-7 bg-white assignment-param-2 focus:border-blue-500 outline-none" 
+                                ${isDisabled ? 'disabled' : ''} 
+                                onclick="event.stopPropagation()" 
+                                onchange="handleParamChange('${safeName}', 'param2', this.value)"
+                                style="width: 85px">
+                                ${durationOpts}
+                           </select>` +
+                           `<input type="checkbox" class="ml-2 h-4 w-4 rounded text-blue-600 stow-checkbox cursor-pointer" ${isDisabled ? 'disabled' : ''} ${isSelected ? 'checked' : ''}>`;
+             }
+             // --- KONIEC ZMIANY ---
              else {
+                // Support (stara logika)
                 const roles = (state.settings && state.settings.customRoles && state.settings.customRoles[mode]) || [];
                 let roleOpts = `<option ${!savedParams ? 'selected' : ''} disabled>Rodzaj...</option>`;
                 roles.forEach(r => { roleOpts += `<option>${r}</option>`; });
@@ -447,7 +486,7 @@ function handleParamChange(nameEncoded, type, value) {
 
     const data = state.pendingAssignments.get(name);
     if (type === 'param1') data.break = value; 
-    if (type === 'param2') data.floor = value;
+    if (type === 'param2') data.floor = value; // Dla Misji: '' lub 'Full'
     state.pendingAssignments.set(name, data);
 }
 
@@ -481,6 +520,13 @@ function handleRowClick(name, rowEl, event) {
     if (!wasSelected && dom.globalSearch && dom.globalSearch.value.trim() !== '') {
         dom.globalSearch.value = '';
         renderUnifiedList();
+        
+        // NOWE: Scroll do elementu po odświeżeniu
+        setTimeout(() => {
+            const el = document.querySelector(`div[data-name="${name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}"]`);
+            if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 50);
+        
         if(dom.globalSearch) dom.globalSearch.focus();
     }
     
@@ -508,10 +554,30 @@ function handleRowClick(name, rowEl, event) {
             return; 
         }
         
+        // --- NOWE: SYNCHRONIZACJA Z AUTO-SELECT (Batch) ---
         let val1 = '';
         let val2 = '';
+        
+        // Pobierz wartości z Batch Controls, jeśli są ustawione
+        if (state.currentMode === 'stow') {
+            if (dom.stowBatchFloor && dom.stowBatchFloor.value) val2 = dom.stowBatchFloor.value;
+            if (dom.stowBatchBreak && dom.stowBatchBreak.value) val1 = dom.stowBatchBreak.value;
+        } 
+        else if (state.currentMode === 'missions') {
+            if (dom.batchRoleSelect && dom.batchRoleSelect.value) val1 = dom.batchRoleSelect.value;
+            if (dom.batchDurationSelect && dom.batchDurationSelect.value) val2 = dom.batchDurationSelect.value;
+        }
+        else if (state.currentMode === 'support') {
+            if (dom.batchRoleSelect && dom.batchRoleSelect.value) val1 = dom.batchRoleSelect.value;
+        }
+
+        // Ustaw w selectach wiersza
         const s1 = rowEl.querySelector('.assignment-param-1');
         const s2 = rowEl.querySelector('.assignment-param-2');
+        if (s1 && val1) s1.value = val1;
+        if (s2 && val2) s2.value = val2;
+        
+        // Pobierz aktualne wartości z selectów (mogły być już ustawione ręcznie wcześniej lub przez batch powyżej)
         if (s1) val1 = s1.value;
         if (s2) val2 = s2.value;
         
@@ -524,6 +590,13 @@ function handleRowClick(name, rowEl, event) {
         if (dom.globalSearch && dom.globalSearch.value.trim() !== '') {
             dom.globalSearch.value = '';
             renderUnifiedList(); 
+            
+            // NOWE: Scroll po odświeżeniu
+            setTimeout(() => {
+                const el = document.querySelector(`div[data-name="${name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}"]`);
+                if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 50);
+
             if(dom.globalSearch) dom.globalSearch.focus();
         }
 
