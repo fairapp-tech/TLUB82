@@ -1,0 +1,331 @@
+<script>
+// Plik: JS-Logic-Core.html
+// Moduł: Rdzeń Logiki (Inicjalizacja, Pobieranie Danych, Eventy, Persistence)
+// Wersja: Smart Cache Support (Employee Meta Handling)
+
+document.addEventListener('DOMContentLoaded', () => {
+  console.log("🚀 Aplikacja startuje (Logic Core)...");
+  
+  if (typeof state === 'undefined' || typeof dom === 'undefined') {
+      alert("Błąd krytyczny: Nie załadowano stanu aplikacji. Odśwież stronę.");
+      return;
+  }
+
+  // 1. Start pobierania danych
+  fetchAllData();
+  
+  try {
+    addEventListeners();
+    console.log("✅ Event listenery dodane.");
+  } catch (e) {
+    console.error("⚠️ Błąd listenerów:", e);
+  }
+});
+
+// =====================================================
+// === POBIERANIE DANYCH STARTOWYCH ===
+// =====================================================
+
+function fetchAllData() {
+  console.log("🔄 Pobieranie danych startowych...");
+
+  if (dom.unifiedList) {
+      dom.unifiedList.innerHTML = '<div class="p-8 text-center text-slate-400 text-sm"><div class="loader-sm mb-2"></div>Ładowanie systemu...</div>';
+  }
+
+  google.script.run
+    .withSuccessHandler(data => {
+      if (!data) {
+        handleServerError({ message: "Puste dane z serwera." });
+        return;
+      }
+
+      // 1. Pracownicy i Metadane (Smart Cache)
+      if (data.employeeMeta) {
+          state.employees = Array.isArray(data.employees) ? data.employees : [];
+          state.employeeMeta = data.employeeMeta;
+      } else {
+          // Fallback (stary format)
+          state.employees = Array.isArray(data.employees) ? data.employees : [];
+          // Domyślne wartości, by nie wywalić UI
+          state.employeeMeta = { source: 'LIVE', date: new Date().toLocaleDateString('pl-PL'), timestamp: Date.now() }; 
+      }
+
+      console.log(`👥 Pracownicy: ${state.employees.length}, Źródło: ${state.employeeMeta.source} (${state.employeeMeta.date})`);
+
+      state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      state.currentUserEmail = data.currentUserEmail || '';
+      
+      // 2. Planowanie (Beauty)
+      state.planningData = Array.isArray(data.planningData) ? data.planningData : [];
+      if (state.planningData.length > 0) {
+          console.log(`📅 Załadowano planowanie Beauty: ${state.planningData.length} osób.`);
+      }
+
+      // 3. Statystyki Grupy
+      state.groupStats = data.groupStats || { total: 0, present: 0, trained: 0, plan: [], subgroups: { A: {total:0, present:0}, B: {total:0, present:0} } };
+      
+      // 4. Ustawienia
+      if (data.settings) {
+          state.settings = data.settings;
+      }
+      
+      state.widgets = data.widgets || {
+          stow: { today: [], recent: [], recentDateLabel: '' },
+          carts: { today: [], recent: [], recentDateLabel: '' },
+          missions: { today: [], recent: [], recentDateLabel: '' },
+          support: { today: [], recent: [], recentDateLabel: '' }
+      };
+      
+      state.isDataLoaded = true;
+      
+      // 5. Tryb Startowy
+      const startMode = state.settings.defaultMode || 'tasks';
+      state.currentMode = startMode;
+      
+      updateInterfaceForMode(startMode);
+      
+      if (dom.modeSelector) {
+          dom.modeSelector.querySelectorAll('button').forEach(b => {
+              if (b.dataset.mode === startMode) b.classList.add('active');
+              else b.classList.remove('active');
+          });
+      }
+
+      try {
+        if (startMode !== 'tasks') {
+            loadRotationalData();
+        } else {
+            // Tutaj renderUnifiedList obsłuży wyświetlanie komunikatów Cache/None
+            renderUnifiedList(); 
+        }
+
+        if (typeof renderAllTasks === 'function') renderAllTasks();
+        if (typeof renderStowersWidgetUI === 'function') renderStowersWidgetUI();
+        
+      } catch (err) {
+        handleServerError(err, "Błąd renderowania startowego");
+      }
+    })
+    .withFailureHandler(handleServerError)
+    .getInitialData();
+}
+
+// =====================================================
+// === EVENT LISTENERS (Obsługa UI) ===
+// =====================================================
+
+function addEventListeners() {
+  
+  // 1. PRZEŁĄCZANIE TRYBÓW
+  if (dom.modeSelector) {
+    dom.modeSelector.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const newMode = btn.dataset.mode;
+          if (state.currentMode === newMode) return;
+          
+          if (typeof clearEmployeeSelection === 'function') {
+              clearEmployeeSelection();
+          }
+
+          dom.modeSelector.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          
+          state.currentMode = newMode;
+          
+          updateInterfaceForMode(newMode);
+          
+          if (typeof renderStowersWidgetUI === 'function') renderStowersWidgetUI();
+          
+          if (newMode !== 'tasks') {
+            loadRotationalData(); 
+          } else {
+            renderUnifiedList();
+          }
+      });
+    });
+  }
+
+  // 2. WYSZUKIWARKA GLOBALNA
+  if (dom.globalSearch) {
+    dom.globalSearch.addEventListener('input', () => {
+       if (typeof renderUnifiedList === 'function') renderUnifiedList();
+    });
+  }
+
+  // 3. OBSŁUGA AKCJI (Stopka Rotacyjna)
+  if (dom.stowAutoSelectBtn) dom.stowAutoSelectBtn.addEventListener('click', handleRotationalAutoSelect);
+  if (dom.mainActionBtn) dom.mainActionBtn.addEventListener('click', handleRotationalSubmit);
+
+  // 4. OBSŁUGA ZADAŃ
+  if (dom.addTaskBtn) dom.addTaskBtn.addEventListener('click', handleAddTask);
+  if (dom.taskDescription) dom.taskDescription.addEventListener('input', updateFormStateUI);
+  if (dom.taskSearch) dom.taskSearch.addEventListener('input', e => renderAllTasks(e.target.value));
+  
+  if (dom.taskList) {
+    dom.taskList.addEventListener('click', handleTaskListClick); 
+    dom.taskList.addEventListener('change', handleTaskListChange);
+  }
+  
+  // 5. MODALE STANDARDOWE
+  if(dom.cancelDeleteBtn) dom.cancelDeleteBtn.addEventListener('click', () => { state.taskToDelete = { id: null, isBulk: false }; closeDeleteModalUI(); });
+  if(dom.confirmDeleteBtn) dom.confirmDeleteBtn.addEventListener('click', handleConfirmDelete);
+  if(dom.cancelEditBtn) dom.cancelEditBtn.addEventListener('click', closeEditModalUI);
+  if(dom.saveChangesBtn) dom.saveChangesBtn.addEventListener('click', handleSaveChanges);
+  if(dom.bulkCompleteBtn) dom.bulkCompleteBtn.addEventListener('click', () => handleCompleteTasks([...state.selectedTaskIds]));
+  if(dom.bulkDeleteBtn) dom.bulkDeleteBtn.addEventListener('click', () => openDeleteModalUI([...state.selectedTaskIds], true));
+  
+  if(dom.closeHistoryBtn) dom.closeHistoryBtn.addEventListener('click', closeHistoryModalUI);
+  if(dom.historyModal) dom.historyModal.addEventListener('click', (e) => { if (e.target === dom.historyModal) closeHistoryModalUI(); });
+
+  // 6. KATEGORIE ZADAŃ
+  if (dom.categoryButtons) {
+    dom.categoryButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const newCategory = e.currentTarget.dataset.category;
+        if (typeof handleCategorySwitch === 'function') {
+          handleCategorySwitch(newCategory, e.currentTarget);
+        }
+      });
+    });
+  }
+
+  // 7. OBSŁUGA USTAWIEŃ
+  if (dom.settingsBtn) dom.settingsBtn.addEventListener('click', openSettingsModalUI);
+  if (dom.closeSettingsBtn) dom.closeSettingsBtn.addEventListener('click', closeSettingsModalUI);
+  if (dom.settingsModal) dom.settingsModal.addEventListener('click', (e) => { if (e.target === dom.settingsModal) closeSettingsModalUI(); });
+  
+  if (dom.addSupportRoleBtn) dom.addSupportRoleBtn.addEventListener('click', () => addRoleUI('support'));
+  if (dom.addMissionRoleBtn) dom.addMissionRoleBtn.addEventListener('click', () => addRoleUI('missions'));
+  
+  if (dom.saveSettingsBtn) {
+      dom.saveSettingsBtn.addEventListener('click', () => {
+          if (typeof saveSettingsUI === 'function') {
+              saveSettingsUI(); 
+          }
+      });
+  }
+
+  // 8. OBSŁUGA KOLIZJI
+  if (dom.confirmCollisionBtn) {
+      dom.confirmCollisionBtn.addEventListener('click', confirmCollisionUI);
+  }
+
+  // 9. OBSŁUGA ODZNACZANIA
+  if (dom.clearSelectionBtn) {
+      dom.clearSelectionBtn.addEventListener('click', () => {
+          if (typeof clearEmployeeSelection === 'function') {
+              clearEmployeeSelection();
+          }
+      });
+  }
+}
+
+// =====================================================
+// === POBIERANIE DANYCH ROTACYJNYCH (Backend) ===
+// =====================================================
+
+function loadRotationalData() {
+  const mode = state.currentMode;
+  
+  if (dom.unifiedList) {
+      dom.unifiedList.innerHTML = `<div class="p-8 text-center text-slate-400 text-sm"><div class="loader-sm mb-2"></div>Pobieranie danych: ${mode}...</div>`;
+  }
+
+  google.script.run
+    .withSuccessHandler(data => {
+      // Sortowanie
+      const sorted = [...data].sort((a, b) => {
+        if (a.isExcluded !== b.isExcluded) return (a.isExcluded ? 1 : 0) - (b.isExcluded ? 1 : 0);
+        if (a.wasToday !== b.wasToday) return (a.wasToday ? 1 : 0) - (b.wasToday ? 1 : 0);
+        if (a.weekCount !== b.weekCount) return a.weekCount - b.weekCount;
+        if (a.monthCount !== b.monthCount) return a.monthCount - b.monthCount;
+        if (a.yearCount !== b.yearCount) return a.yearCount - b.yearCount; 
+        return a.name.localeCompare(b.name, 'pl');
+      });
+      
+      state.stowData = sorted; 
+      state.isStowLoaded = true;
+      
+      renderUnifiedList();
+      
+      if (typeof renderStowersWidgetUI === 'function') renderStowersWidgetUI();
+      
+    })
+    .withFailureHandler(err => {
+      console.error(err);
+      if (typeof showToast === 'function') showToast("Błąd pobierania danych: " + err.message, 'error');
+      if (dom.unifiedList) dom.unifiedList.innerHTML = `<div class="p-4 text-center text-red-400">Błąd: ${err.message}</div>`;
+    })
+    .getRotationalData(mode); 
+}
+
+// === HISTORIA ===
+window.handleShowHistory = function(name) {
+  const decodedName = name.replace(/\\'/g, "'").replace(/&quot;/g, '"');
+  const mode = state.currentMode;
+  
+  if (typeof openHistoryModalUI === 'function') openHistoryModalUI(decodedName);
+  
+  google.script.run
+    .withSuccessHandler(historyData => {
+        if (typeof renderHistoryModalList === 'function') renderHistoryModalList(historyData);
+    })
+    .withFailureHandler(err => {
+      if (typeof closeHistoryModalUI === 'function') closeHistoryModalUI();
+      if (typeof showToast === 'function') showToast("Błąd historii: " + err.message, 'error');
+    })
+    .getEmployeeYearlyHistory(decodedName, mode); 
+};
+
+// === HELPER UI DO ZMIANY TRYBU ===
+function updateInterfaceForMode(mode) {
+  const titles = { 
+    tasks: 'Wybierz pracowników', 
+    stow: 'Kolejka STOW (Rotacja)', 
+    carts: 'Przydział Cartów (Rotacja)', 
+    missions: 'Przydział Misji (Rotacja)', 
+    support: 'Role Wsparcia (Rotacja)',
+    beauty: 'Przydział Beauty (Rotacja)'
+  };
+  
+  if(dom.modeTitle) dom.modeTitle.textContent = titles[mode] || 'Lista';
+  
+  if (dom.stowStatsLegend) {
+      if (mode !== 'tasks') dom.stowStatsLegend.classList.remove('hidden');
+      else dom.stowStatsLegend.classList.add('hidden');
+  }
+  
+  // Zarządzanie widocznością stopek
+  if (mode === 'tasks') {
+    dom.footerTasks.classList.remove('hidden');
+    dom.footerAction.classList.add('hidden');
+  } else {
+    dom.footerTasks.classList.add('hidden');
+    dom.footerAction.classList.remove('hidden');
+    
+    if(dom.mainActionText) dom.mainActionText.textContent = (mode === 'stow') ? 'Zapisz Przydział' : 'Zapisz';
+    
+    // --- KONTROLKI AUTO-BATCH ---
+    if (dom.stowBatchFloor) dom.stowBatchFloor.style.display = 'none';
+    if (dom.stowBatchBreak) dom.stowBatchBreak.style.display = 'none';
+    if (dom.batchRoleSelect) dom.batchRoleSelect.style.display = 'none';
+
+    if (mode === 'stow') {
+        if (dom.stowBatchFloor) dom.stowBatchFloor.style.display = 'inline-block';
+        if (dom.stowBatchBreak) dom.stowBatchBreak.style.display = 'inline-block';
+    } 
+    else if (mode === 'missions' || mode === 'support') {
+        if (dom.batchRoleSelect) {
+            dom.batchRoleSelect.style.display = 'inline-block';
+            
+            const roles = state.settings.customRoles[mode] || [];
+            dom.batchRoleSelect.innerHTML = `<option value="" disabled selected>Wybierz rolę dla grupy...</option>` + 
+                                            roles.map(r => `<option>${r}</option>`).join('');
+        }
+    }
+  }
+  
+  if(typeof updateClearButtonVisibility === 'function') updateClearButtonVisibility();
+}
+</script>

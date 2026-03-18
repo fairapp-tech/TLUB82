@@ -1,0 +1,174 @@
+<script>
+// Plik: JS-UI-Tasks.html
+// Moduł: Renderowanie Listy Zadań (Prawy Panel - Lista tekstowa)
+// Wersja: Odchudzona + Announcements Section
+
+console.log("Ładowanie modułu UI Tasks...");
+
+// =====================================================
+// === GŁÓWNE RENDEROWANIE ZADAŃ ===
+// =====================================================
+
+function renderAllTasks(filter) {
+  if (!filter) filter = '';
+  if (!state || !state.isDataLoaded) return;
+
+  try {
+    const lcf = filter.toLowerCase();
+    
+    // Filtrowanie zadań
+    const ft = state.tasks.filter(t => {
+      if (!filter) return true;
+      const desc = t.description ? t.description.toLowerCase() : '';
+      const emp = t.employee ? t.employee.toLowerCase() : '';
+      return desc.includes(lcf) || emp.includes(lcf);
+    });
+
+    // Sekcje Zadań
+    let html = '';
+    // Kontener na widgety rotacyjne (tylko placeholder, wypełniany przez JS-UI-Widgets)
+    html += '<div id="rotationalWidgets" class="mb-8 transition-all duration-300"></div>';
+    
+    // 1. Pracownicy
+    html += createTaskSection('employeeTasks', 'Dla Pracowników', ft.filter(t => t.category === 'Dla pracownika'));
+    
+    // 2. Odprawa
+    html += createTaskSection('briefingTasks', 'Na Odprawę', ft.filter(t => t.category === 'Na odprawę'));
+    
+    // 3. Ogłoszenia (NOWE)
+    html += createTaskSection('announcementsTasks', 'Ogłoszenia', ft.filter(t => t.category === 'Ogłoszenia'));
+    
+    // 4. Inne / Osobiste
+    html += createTaskSection('personalTasks', 'Inne / Osobiste', ft.filter(t => t.category === 'Osobista'));
+
+    if (dom.taskList) {
+      dom.taskList.innerHTML = html;
+    }
+    
+    // Aktualizacja liczników i podpięcie nawigacji
+    updateTaskCountsUI();
+    setupNavScroll();
+    
+    updateBulkActionUI();
+    
+    // Renderowanie widgetów (funkcja z pliku JS-UI-Widgets.html)
+    if (typeof renderStowersWidgetUI === 'function') {
+        renderStowersWidgetUI();
+    }
+
+  } catch (e) {
+    console.error("Błąd wewnątrz renderAllTasks:", e);
+    if (dom.taskList) {
+       dom.taskList.innerHTML = `<div class="p-4 text-red-600 bg-red-50 border border-red-300 rounded text-sm">Błąd wyświetlania listy zadań: ${e.message}</div>`;
+    }
+  }
+}
+
+// =====================================================
+// === LOGIKA LICZNIKÓW I NAWIGACJI ===
+// =====================================================
+
+function updateTaskCountsUI() {
+    // Policz tylko NIEZREALIZOWANE zadania
+    const countEmployee = state.tasks.filter(t => t.category === 'Dla pracownika' && t.status !== 'Zrealizowano').length;
+    const countBriefing = state.tasks.filter(t => t.category === 'Na odprawę' && t.status !== 'Zrealizowano').length;
+    const countAnnouncements = state.tasks.filter(t => t.category === 'Ogłoszenia' && t.status !== 'Zrealizowano').length; // NOWE
+    const countPersonal = state.tasks.filter(t => t.category === 'Osobista' && t.status !== 'Zrealizowano').length;
+
+    // Helper do stylowania badge'a
+    const updateBadge = (id, count) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = count;
+        el.className = "count-badge ml-1.5 px-2 py-0.5 rounded-full text-xs font-bold transition-all duration-300";
+        if (count > 0) {
+            el.classList.add("bg-blue-100", "text-blue-700", "shadow-sm");
+        } else {
+            el.classList.add("bg-slate-100", "text-slate-400");
+        }
+    };
+
+    updateBadge('employeeTaskCount', countEmployee);
+    updateBadge('briefingTaskCount', countBriefing);
+    updateBadge('announcementsTaskCount', countAnnouncements); // NOWE
+    updateBadge('personalTaskCount', countPersonal);
+}
+
+function setupNavScroll() {
+    const scroll = (btnId, sectionId) => {
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        btn.onclick = function() {
+            const section = document.getElementById(sectionId);
+            if (section) {
+                section.classList.add('ring-2', 'ring-blue-200', 'rounded-lg');
+                setTimeout(() => section.classList.remove('ring-2', 'ring-blue-200', 'rounded-lg'), 1000);
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                showToast("Brak zadań w tej sekcji.", "info");
+            }
+        };
+    };
+    scroll('navEmployee', 'employeeTasks');
+    scroll('navBriefing', 'briefingTasks');
+    scroll('navAnnouncements', 'announcementsTasks'); // NOWE
+    scroll('navPersonal', 'personalTasks');
+}
+
+// =====================================================
+// === GENEROWANIE HTML WIERSZY I SEKCJI ===
+// =====================================================
+
+function createTaskSection(id, title, tasks) {
+  const sorted = [...tasks].sort((a, b) => {
+    if (a.status === 'Zrealizowano' && b.status !== 'Zrealizowano') return 1;
+    if (a.status !== 'Zrealizowano' && b.status === 'Zrealizowano') return -1;
+    function parseTime(str) { try { if (str.includes('.')) { const [d, t] = str.split(' '); const [dd, mm, yyyy] = d.split('.'); const [hh, min] = t ? t.split(':') : [0,0]; return new Date(yyyy, mm-1, dd, hh, min).getTime(); } } catch(e) {} return new Date(str).getTime() || 0; }
+    return parseTime(b.creationTime) - parseTime(a.creationTime);
+  });
+  
+  // Czy to sekcja "notatkowa" (bez pracownika)?
+  const isNote = (id === 'briefingTasks' || id === 'personalTasks' || id === 'announcementsTasks');
+  
+  let headers = `<th class="p-3 w-[40px] text-center border-b bg-slate-50"><input type="checkbox" class="section-checkbox h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" data-section-id="${id}"></th>`;
+  
+  if (!isNote) headers += `<th class="p-3 w-[160px] text-left font-semibold text-slate-600 border-b bg-slate-50">Pracownik</th>`;
+  
+  headers += `<th class="p-3 w-auto text-left font-semibold text-slate-600 border-b bg-slate-50">Opis</th><th class="p-3 w-[15%] text-center font-semibold text-slate-600 border-b bg-slate-50">Termin</th><th class="p-3 w-[15%] text-center font-semibold text-slate-600 border-b bg-slate-50">Wystawiono</th>`;
+  
+  let rowsHtml = sorted.length === 0 ? `<tr><td colspan="${isNote ? 4 : 5}" class="p-6 text-center text-slate-400 border-b border-slate-100 text-sm italic">Brak zadań.</td></tr>` : sorted.map(t => createTaskRowHTML(t, isNote)).join('');
+  
+  // Kolor paska przy tytule zależny od sekcji
+  let barColor = 'bg-blue-500';
+  if(id === 'briefingTasks') barColor = 'bg-indigo-500';
+  if(id === 'announcementsTasks') barColor = 'bg-teal-500';
+  if(id === 'personalTasks') barColor = 'bg-amber-500';
+
+  return `<section id="${id}" class="mb-8 scroll-mt-20"><h2 class="text-lg font-bold mb-3 text-slate-700 flex items-center"><span class="w-1.5 h-5 ${barColor} rounded-sm mr-2"></span> ${title}</h2><div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden"><table class="w-full text-sm text-left border-collapse table-fixed"><thead><tr>${headers}</tr></thead><tbody id="${id}-body" class="divide-y divide-slate-100">${rowsHtml}</tbody></table></div></section>`;
+}
+
+function createTaskRowHTML(t, isNote) {
+  const done = t.status === 'Zrealizowano'; const sel = state.selectedTaskIds.has(t.taskId);
+  const cls = done ? 'line-through text-slate-400' : 'text-slate-700';
+  let isOverdue = false; if (t.deadline && !done) { try { const parts = t.deadline.split('.'); if(parts.length===3) { const d=new Date(parts[2],parts[1]-1,parts[0]); d.setHours(23,59,59); if(d<new Date()) isOverdue=true; } } catch(e){} }
+  const bgClass = sel ? 'bg-blue-50 hover:bg-blue-100' : (isOverdue ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-slate-50 bg-white');
+  const commentCount = (t.replies && t.replies.length) || 0;
+  const commentIndicator = commentCount > 0 ? `<span class="inline-flex items-center justify-center w-5 h-5 ml-2 text-[10px] font-bold text-blue-600 bg-blue-100 rounded-full cursor-pointer hover:bg-blue-200 transition" title="Komentarze">${commentCount}</span>` : '';
+  const priorityDot = t.priority === 'Wysoki' ? '<span class="inline-block w-2 h-2 rounded-full mr-1.5 bg-red-500"></span>' : (t.priority === 'Niski' ? '<span class="inline-block w-2 h-2 rounded-full mr-1.5 bg-green-500"></span>' : '<span class="inline-block w-2 h-2 rounded-full mr-1.5 bg-yellow-400"></span>');
+  
+  let cells = `<td class="p-3 text-center align-middle"><input type="checkbox" class="row-checkbox h-4 w-4 rounded text-blue-600 cursor-pointer" ${sel ? 'checked' : ''}></td>`;
+  
+  if (!isNote) cells += `<td class="p-3 align-middle font-medium ${cls} break-words" title="${t.employee}">${t.employee}</td>`;
+  
+  cells += `<td class="p-3 align-middle break-words leading-relaxed ${cls} cursor-pointer">${priorityDot} ${t.description} ${commentIndicator}</td><td class="p-3 align-middle text-center break-words text-xs ${isOverdue ? 'text-red-600 font-bold' : cls}">${t.deadline||'-'}</td><td class="p-3 align-middle text-center break-words text-xs text-slate-500">${t.creationTime}</td>`;
+  
+  return `<tr class="border-b border-slate-100 transition-colors duration-150 ${bgClass}" data-task-id="${t.taskId}" style="${done ? 'opacity: 0.6;' : ''}">${cells}</tr><tr class="replies-row hidden" data-reply-for="${t.taskId}"><td colspan="${isNote?4:5}" class="p-0 border-b border-slate-200"><div class="replies-container bg-slate-50 p-4 shadow-inner"></div></td></tr>`;
+}
+
+function updateBulkActionUI() {
+  const count = state.selectedTaskIds.size; if (!dom.bulkActionContainer) return; dom.selectedCount.textContent = count;
+  count > 0 ? dom.bulkActionContainer.classList.remove('translate-y-full') : dom.bulkActionContainer.classList.add('translate-y-full');
+  const anyDone = Array.from(state.selectedTaskIds).some(id => { const t = state.tasks.find(x => x.taskId === id); return t && t.status === 'Zrealizowano'; });
+  if (dom.bulkCompleteBtn) { dom.bulkCompleteBtn.disabled = anyDone; anyDone ? dom.bulkCompleteBtn.classList.add('opacity-50') : dom.bulkCompleteBtn.classList.remove('opacity-50'); }
+}
+</script>

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <?!= include('Stylesheet'); ?>
+  <style>
+    /* Nowoczesny styl przycisków trybów - Bottom Line */
+    .mode-btn {
+      flex-direction: column;
+      height: auto;
+      min-height: 55px;
+      gap: 3px;
+      background-color: white;
+      border: 1px solid transparent; /* Domyślnie brak ramki */
+      border-bottom-width: 3px;     /* Przygotowanie pod linię akcentu */
+      border-bottom-color: transparent;
+      transition: all 0.2s;
+      position: relative; /* Dla badge'a MULTI */
+      overflow: visible;
+      color: #94a3b8; /* slate-400 */
+    }
+    
+    .mode-btn:hover {
+      background-color: #f8fafc; /* slate-50 */
+      color: #64748b; /* slate-500 */
+    }
+
+    /* Aktywne stany z kolorami */
+    .mode-btn.active[data-mode="tasks"] {
+      border-bottom-color: #3b82f6; /* blue-500 */
+      color: #2563eb; /* blue-600 */
+      background-color: #eff6ff; /* blue-50 */
+    }
+    .mode-btn.active[data-mode="stow"] {
+      border-bottom-color: #6366f1; /* indigo-500 */
+      color: #4f46e5; /* indigo-600 */
+      background-color: #eef2ff; /* indigo-50 */
+    }
+    .mode-btn.active[data-mode="carts"] {
+      border-bottom-color: #f97316; /* orange-500 */
+      color: #ea580c; /* orange-600 */
+      background-color: #fff7ed; /* orange-50 */
+    }
+    .mode-btn.active[data-mode="support"] {
+      border-bottom-color: #ec4899; /* pink-500 */
+      color: #db2777; /* pink-600 */
+      background-color: #fdf2f8; /* pink-50 */
+    }
+    .mode-btn.active[data-mode="missions"] {
+      border-bottom-color: #a855f7; /* purple-500 */
+      color: #9333ea; /* purple-600 */
+      background-color: #faf5ff; /* purple-50 */
+    }
+    .mode-btn.active[data-mode="beauty"] {
+      border-bottom-color: #d946ef; /* fuchsia-500 */
+      color: #c026d3; /* fuchsia-600 */
+      background-color: #fdf4ff; /* fuchsia-50 */
+    }
+
+    .mode-text {
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    /* Badge MULTI dla Misji */
+    .badge-multi {
+      position: absolute;
+      top: -5px;
+      right: -3px;
+      background-color: #a855f7; /* purple-500 */
+      color: white;
+      font-size: 7px;
+      font-weight: 800;
+      padding: 1px 4px;
+      border-radius: 4px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      z-index: 10;
+      letter-spacing: 0.05em;
+    }
+
+    /* Reszta stylów */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background-color: rgba(15, 23, 42, 0.7);
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(2px);
+    }
+    .modal-content {
+        background-color: white;
+        border-radius: 0.75rem;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        max-width: 500px;
+        width: 95%;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #e2e8f0;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans">
+
+<div id="toast-container"></div>
+
+<div id="app" class="flex flex-col md:flex-row h-screen overflow-hidden">
+
+<!-- LEWY PANEL -->
+<aside id="sidebarPanel" class="w-full md:w-[450px] shrink-0 bg-white border-r border-slate-200 flex flex-col h-full shadow-lg z-20 transition-all" style="min-width: 350px;">
+  
+  <div class="p-3 border-b border-slate-200 bg-white shrink-0 space-y-3">
+    <div class="relative">
+       <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+       </span>
+       <input type="text" id="globalSearch" placeholder="Szukaj pracownika..." class="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition bg-slate-50 focus:bg-white">
+    </div>
+
+    <!-- GRID PRZYCISKÓW TRYBÓW (ZWIĘKSZONO KOLUMNY DO 6) -->
+    <div class="grid grid-cols-6 gap-1 p-1 bg-slate-100 rounded-lg" id="modeSelector">
+      <!-- 1. Zadania -->
+      <button data-mode="tasks" class="mode-btn active border border-blue-200 bg-blue-50/30 hover:bg-blue-100/50" title="Zadania">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+        <span class="mode-text">Zadania</span>
+      </button>
+      
+      <!-- 2. Stow -->
+      <button data-mode="stow" class="mode-btn" title="STOW">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        <span class="mode-text">Stow</span>
+      </button>
+      
+      <!-- 3. Carty -->
+      <button data-mode="carts" class="mode-btn" title="Carty">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+        <span class="mode-text">Carty</span>
+      </button>
+
+      <!-- 4. Wsparcie -->
+      <button data-mode="support" class="mode-btn" title="Wsparcie">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="14.83" y1="9.17" x2="18.36" y2="5.64"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/></svg>
+        <span class="mode-text">Wsparcie</span>
+      </button>
+
+      <!-- 5. Beauty (NOWE) -->
+      <button data-mode="beauty" class="mode-btn" title="Beauty">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        <span class="mode-text">Beauty</span>
+      </button>
+
+      <!-- 6. Misje (MULTI) -->
+      <button data-mode="missions" class="mode-btn border border-purple-200 bg-purple-50/30 hover:bg-purple-100/50" title="Misje (Multi)">
+        <span class="badge-multi">MULTI</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        <span class="mode-text">Misje</span>
+      </button>
+    </div>
+    
+    <div id="dynamicHeader" class="text-xs text-slate-500 font-medium flex justify-between items-center h-4 select-none">
+       <div class="flex items-center gap-2">
+         <span id="modeTitle">Wybierz pracowników</span>
+         <button id="clearSelectionBtn" class="hidden text-[10px] font-bold text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded transition-colors border border-red-100">
+           Odznacz
+         </button>
+       </div>
+       <div id="stowStatsLegend" class="hidden gap-2">
+         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded bg-green-200"></span> Mało</span>
+         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded bg-red-200"></span> Dużo</span>
+       </div>
+    </div>
+  </div>
+
+  <!-- LISTA -->
+  <div id="unifiedList" class="flex-grow overflow-y-auto custom-scrollbar bg-white relative">
+    <div class="p-8 text-center text-slate-400 text-sm"><div class="loader-sm mb-2"></div>Inicjalizacja...</div>
+  </div>
+
+  <!-- STOPKA -->
+  <div id="sidebarFooter" class="p-3 border-t border-slate-200 bg-slate-50 shrink-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+    
+    <!-- Zadania -->
+    <div id="footerTasks" class="space-y-3">
+       <div class="flex gap-1 p-1 bg-white rounded-md border border-slate-200">
+        <button data-category="Dla pracownika" class="category-btn active-category flex-1 py-1.5 px-1 text-[10px] font-semibold rounded transition whitespace-nowrap overflow-hidden text-ellipsis">Pracownik</button>
+        <button data-category="Na odprawę" class="category-btn flex-1 py-1.5 px-1 text-[10px] font-semibold rounded transition whitespace-nowrap overflow-hidden text-ellipsis">Odprawa</button>
+        <button data-category="Ogłoszenia" class="category-btn flex-1 py-1.5 px-1 text-[10px] font-semibold rounded transition whitespace-nowrap overflow-hidden text-ellipsis">Ogłoszenia</button>
+        <button data-category="Osobista" class="category-btn flex-1 py-1.5 px-1 text-[10px] font-semibold rounded transition whitespace-nowrap overflow-hidden text-ellipsis">Inne</button>
+       </div>
+       <div id="taskForm" class="hidden space-y-2">
+         <div class="flex justify-between items-center px-1"><span id="formTitle" class="text-xs font-bold text-slate-500 uppercase tracking-wide">Zaznacz pracowników</span></div>
+         <textarea id="taskDescription" class="w-full p-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 resize-none bg-white" rows="2" placeholder="Treść zadania..."></textarea>
+         <div class="flex gap-2">
+           <select id="taskPriority" class="w-1/2 p-1.5 border border-slate-300 rounded text-xs bg-white"><option value="Normalny">Normalny</option><option value="Wysoki">Wysoki 🔴</option><option value="Niski">Niski 🟢</option></select>
+           <input type="text" id="taskDeadline" class="w-1/2 p-1.5 border border-slate-300 rounded text-xs bg-white" placeholder="Termin" onfocus="(this.type='date')" onblur="(this.type='text')">
+         </div>
+         <button id="addTaskBtn" class="w-full bg-blue-600 text-white py-2 rounded font-semibold text-sm hover:bg-blue-700 transition flex justify-center items-center shadow-sm" disabled>
+           <span id="btnText">Dodaj Zadanie</span><div id="btnSpinner" class="loader-btn hidden"></div>
+         </button>
+         <p id="formError" class="text-red-500 text-xs hidden text-center font-medium"></p>
+       </div>
+       <div id="taskEmptyState" class="text-xs text-center text-slate-400 py-2 hidden">Wybierz pracowników z listy powyżej.</div>
+    </div>
+
+    <!-- Rotacja (STOW/Inne) -->
+    <div id="footerAction" class="hidden space-y-3 pb-4">
+      
+      <!-- Panel Auto (Batch) -->
+      <div id="batchControls" class="bg-slate-100 p-2 rounded-md border border-slate-200">
+         <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+              Auto-Przydział
+            </span>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none" title="Zaznaczaj pracowników nawet jeśli mają kolizję">
+                <input type="checkbox" id="batchIgnoreCollisions" class="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-500">
+                <span class="text-[9px] font-bold text-slate-500 hover:text-amber-600 transition-colors">Wymuś</span>
+            </label>
+         </div>
+         <div class="flex gap-2 items-center">
+             <!-- Piętro (Tylko STOW) -->
+             <select id="stowBatchFloor" class="flex-grow border border-slate-300 rounded p-1.5 text-xs bg-white outline-none focus:ring-1 focus:ring-blue-500 h-8 hidden">
+                <option value="" disabled selected>Piętro...</option>
+                <optgroup label="P1">
+                  <option>100</option><option>101</option><option>102</option><option>103</option><option>104</option>
+                </optgroup>
+                <optgroup label="P4">
+                  <option>400</option><option>401</option><option>402</option><option>403</option><option>404</option>
+                </optgroup>
+             </select>
+             
+             <!-- Przerwa (Tylko STOW) -->
+             <select id="stowBatchBreak" class="w-20 border border-slate-300 rounded p-1.5 text-xs bg-white outline-none focus:ring-1 focus:ring-blue-500 h-8 hidden">
+                <option value="" disabled selected>Prz...</option>
+                <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>Gr</option>
+             </select>
+
+             <!-- Wybór Roli (Misje/Wsparcie) -->
+             <select id="batchRoleSelect" class="flex-grow border border-slate-300 rounded p-1.5 text-xs bg-white outline-none focus:ring-1 focus:ring-blue-500 h-8 hidden">
+                <option value="" disabled selected>Rola...</option>
+             </select>
+             
+             <!-- Ilość (Wszędzie) -->
+             <input type="number" id="stowNumToSelect" class="w-12 border border-slate-300 rounded p-1.5 text-xs text-center font-bold h-8" value="5" min="1" placeholder="#">
+             
+             <!-- Przycisk Auto -->
+             <button id="stowAutoSelectBtn" class="bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-700 transition shadow-sm h-8 flex items-center">
+               Auto
+             </button>
+         </div>
+      </div>
+
+      <!-- Akcja Zapisz -->
+      <div class="flex items-center gap-3">
+         <div class="shrink-0 text-xs font-medium text-slate-600 bg-slate-100 px-3 py-2 rounded-md border border-slate-200">
+            Wybrano: <span id="actionCount" class="font-bold text-blue-600 text-sm">0</span>
+         </div>
+         <button id="mainActionBtn" class="flex-grow bg-emerald-600 text-white font-bold py-2 rounded-md hover:bg-emerald-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            <span id="mainActionText">Zapisz Przydział</span>
+         </button>
+      </div>
+    </div>
+
+  </div>
+</aside>
+
+<div id="resizerHandle" class="hidden md:block w-[6px] cursor-col-resize hover:bg-blue-400 bg-transparent transition-colors z-50 select-none -ml-[3px] mr-[3px]"></div>
+
+<!-- PRAWY PANEL -->
+<main class="w-full flex-1 h-full overflow-hidden bg-slate-50 flex flex-col relative z-10">
+  <header class="sticky top-0 bg-white z-20 px-6 py-4 border-b border-slate-200 flex justify-between items-center gap-4 shadow-sm shrink-0 h-[73px]">
+    <div class="flex-grow max-w-md relative">
+       <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></span>
+       <input type="text" id="taskSearch" placeholder="Szukaj w zadaniach..." class="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+    </div>
+    <div class="flex gap-2 text-sm items-center">
+      <button id="navEmployee" class="nav-btn">Pracownicy <span id="employeeTaskCount" class="count-badge">0</span></button>
+      <button id="navBriefing" class="nav-btn">Odprawa <span id="briefingTaskCount" class="count-badge">0</span></button>
+      <button id="navAnnouncements" class="nav-btn">Ogłoszenia <span id="announcementsTaskCount" class="count-badge">0</span></button>
+      <button id="navPersonal" class="nav-btn">Inne <span id="personalTaskCount" class="count-badge">0</span></button>
+      <button id="settingsBtn" class="p-2 ml-3 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-full transition-all" title="Ustawienia">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l-.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
+    </div>
+  </header>
+  <div id="taskList" class="p-6 space-y-8 pb-24 flex-grow overflow-y-auto custom-scrollbar"></div>
+</main>
+</div>
+
+<!-- MODAL USTAWIENIA -->
+<div id="settingsModal" class="hidden modal-overlay">
+  <div class="modal-content flex flex-col h-auto max-h-[85vh]">
+    <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
+        <h3 class="font-bold text-slate-700 text-lg flex items-center gap-2">
+            Ustawienia
+        </h3>
+        <button id="closeSettingsBtn" class="text-slate-400 hover:text-slate-600 transition">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+    
+    <div class="p-6 overflow-y-auto custom-scrollbar space-y-6">
+        <div>
+            <h4 class="text-sm font-bold text-slate-700 uppercase mb-3 border-b pb-1">Start Aplikacji</h4>
+            <label class="block text-sm text-slate-600 mb-2">Domyślny moduł po otwarciu:</label>
+            <select id="settingsDefaultMode" class="w-full border border-slate-300 rounded p-2 text-sm bg-white">
+                <option value="tasks">Zadania (Domyślne)</option>
+                <option value="stow">STOW</option>
+                <option value="carts">Carty</option> <!-- ZMIANA NAZWY -->
+                <option value="missions">Misje</option>
+                <option value="support">Wsparcie</option>
+                <option value="beauty">Beauty</option> <!-- NOWE -->
+            </select>
+        </div>
+
+        <div>
+            <h4 class="text-sm font-bold text-slate-700 uppercase mb-3 border-b pb-1">Ustawienia Użytkownika</h4>
+            <label class="block text-sm text-slate-600 mb-2">Twoja Grupa (Grafik):</label>
+            <select id="settingsUserGroup" class="w-full border border-slate-300 rounded p-2 text-sm bg-white">
+                <option value="">-- Brak (Użyj algorytmu tygodniowego) --</option>
+                <option value="A">Grupa A</option>
+                <option value="B">Grupa B</option>
+                <option value="C">Grupa C</option>
+                <option value="D">Grupa D</option>
+                <option value="E">Grupa E</option>
+                <option value="F">Grupa F</option>
+                <option value="G">Grupa G</option>
+                <option value="H">Grupa H</option>
+            </select>
+            <p class="text-[10px] text-slate-400 mt-1 italic">Wybór grupy pozwoli wyświetlać konkretną zmianę (np. "Zmiana 1") zamiast ogólnego tygodnia.</p>
+        </div>
+
+        <div>
+            <h4 class="text-sm font-bold text-slate-700 uppercase mb-3 border-b pb-1">Role Wsparcia</h4>
+            <div id="rolesSupportList" class="space-y-2 mb-3"></div>
+            <div class="flex gap-2">
+                <input type="text" id="newSupportRole" placeholder="Nowa rola..." class="flex-grow border border-slate-300 rounded p-2 text-xs">
+                <button id="addSupportRoleBtn" class="bg-blue-600 text-white px-3 rounded text-xs font-bold hover:bg-blue-700">+</button>
+            </div>
+        </div>
+        <div>
+            <h4 class="text-sm font-bold text-slate-700 uppercase mb-3 border-b pb-1">Typy Misji</h4>
+            <div id="rolesMissionsList" class="space-y-2 mb-3"></div>
+            <div class="flex gap-2">
+                <input type="text" id="newMissionRole" placeholder="Nowy typ..." class="flex-grow border border-slate-300 rounded p-2 text-xs">
+                <button id="addMissionRoleBtn" class="bg-blue-600 text-white px-3 rounded text-xs font-bold hover:bg-blue-700">+</button>
+            </div>
+        </div>
+
+        <div class="bg-slate-50 p-4 rounded-lg border border-slate-200 mt-4">
+            <h4 class="text-xs font-bold text-slate-600 uppercase mb-2">Administrator: Import Grafiku</h4>
+            <p class="text-[10px] text-slate-500 mb-2">Skopiuj dane z Excela (Ctrl+A, Ctrl+C) i wklej poniżej.</p>
+            <textarea id="importScheduleText" class="w-full p-2 border border-slate-300 rounded text-xs h-24 mb-2 focus:ring-2 focus:ring-blue-500" placeholder="Wklej tutaj dane..."></textarea>
+            <button id="importScheduleBtn" class="w-full bg-slate-600 text-white py-1.5 rounded text-xs font-bold hover:bg-slate-700 transition">Zaimportuj Grafik</button>
+        </div>
+    </div>
+
+    <div class="p-4 border-t border-slate-200 bg-slate-50 rounded-b-xl flex justify-end">
+        <button id="saveSettingsBtn" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
+            Zapisz Ustawienia
+        </button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL KOLIZJI -->
+<div id="collisionModal" class="hidden modal-overlay">
+  <div class="modal-content flex flex-col h-auto max-w-[400px]">
+    <div class="p-4 border-b border-amber-200 bg-amber-50 rounded-t-xl flex items-center gap-3">
+        <div class="bg-amber-100 p-2 rounded-full text-amber-600">
+           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <h3 class="font-bold text-amber-800 text-lg">Wykryto Kolizję</h3>
+    </div>
+    
+    <div class="p-6">
+        <p id="collisionModalText" class="text-sm text-slate-600 mb-4 leading-relaxed">
+            <!-- Treść dynamiczna -->
+        </p>
+        <p class="text-xs text-slate-400 italic">
+            Klikając "Zapisz Równolegle", pracownik będzie przypisany do obu zadań jednocześnie.
+        </p>
+    </div>
+
+    <div class="p-4 border-t border-slate-100 bg-slate-50 rounded-b-xl flex justify-end gap-3">
+        <button onclick="closeCollisionModalUI()" class="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">
+            Anuluj
+        </button>
+        <button id="confirmCollisionBtn" class="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-600 transition shadow-sm">
+            Zapisz Równolegle
+        </button>
+    </div>
+  </div>
+</div>
+
+<div id="bulkActionContainer" class="fixed bottom-0 left-0 right-0 bg-slate-800 text-white p-4 z-30 transform translate-y-full transition-transform duration-300 flex justify-between items-center shadow-lg border-t border-slate-700">
+  <div class="font-medium ml-4 flex items-center gap-2">Zaznaczono: <span id="selectedCount" class="font-bold text-blue-400">0</span></div>
+  <div class="gap-3 flex mr-4">
+    <button id="bulkCompleteBtn" class="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded font-semibold transition text-sm">Zrealizuj</button>
+    <button id="bulkDeleteBtn" class="bg-rose-600 hover:bg-rose-700 px-4 py-2 rounded font-semibold transition text-sm">Usuń</button>
+  </div>
+</div>
+
+<div id="deleteModal" class="hidden fixed inset-0 bg-slate-900/60 z-50 items-center justify-center backdrop-blur-sm"><div class="bg-white p-6 rounded-xl shadow-2xl w-96 border border-slate-200"><h3 class="font-bold text-xl mb-2 text-slate-800">Potwierdź</h3><p id="deleteModalText" class="text-slate-600 mb-6">Usunąć?</p><div class="flex justify-end gap-3"><button id="cancelDelete" class="px-4 py-2 bg-white border text-slate-700 rounded-lg">Anuluj</button><button id="confirmDelete" class="px-4 py-2 bg-rose-600 text-white rounded-lg">Usuń</button></div></div></div>
+<div id="editModal" class="hidden fixed inset-0 bg-slate-900/60 z-50 items-center justify-center backdrop-blur-sm"><div class="bg-white p-6 rounded-xl shadow-2xl w-[500px] border border-slate-200"><h3 class="font-bold text-xl mb-4 text-slate-800">Edycja</h3><div class="space-y-4"><textarea id="editDescription" class="w-full border rounded p-2.5"></textarea><div class="grid grid-cols-2 gap-4"><select id="editPriority" class="w-full border rounded p-2.5"><option>Normalny</option><option>Wysoki</option><option>Niski</option></select><input type="date" id="editDeadline" class="w-full border rounded p-2.5"></div></div><div class="flex justify-end gap-3 mt-8"><button id="cancelEditBtn" class="bg-white border text-slate-700 px-4 py-2 rounded-lg">Anuluj</button><button id="saveChangesBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg">Zapisz</button></div></div></div>
+<div id="historyModal" class="hidden fixed inset-0 bg-slate-900/60 z-50 items-center justify-center backdrop-blur-sm"><div class="bg-white rounded-xl shadow-2xl w-[400px] max-h-[80vh] flex flex-col border border-slate-200"><div class="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 class="font-bold text-slate-700 text-lg" id="historyModalTitle">Historia</h3><button id="closeHistoryBtn" onclick="closeHistoryModalUI()" class="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div><div id="historyList" class="p-0 overflow-y-auto custom-scrollbar flex-grow bg-white"></div></div></div>
+
+<?!= include('JS-State'); ?>
+<?!= include('JS-UI-Tools'); ?>
+<?!= include('JS-UI-Modals'); ?>
+<?!= include('JS-UI-List'); ?>
+<?!= include('JS-UI-Widgets'); ?>
+<?!= include('JS-UI-Tasks'); ?>
+<?!= include('JS-Logic-Shared'); ?>
+<?!= include('JS-Logic-Tasks'); ?>
+<?!= include('JS-Logic-Rotational'); ?>
+<?!= include('JS-Logic-Core'); ?>
+
+<script>
+  (function() {
+    const resizer = document.getElementById('resizerHandle'); const sidebar = document.getElementById('sidebarPanel');
+    if (!resizer || !sidebar) return;
+    let isResizing = false;
+    resizer.addEventListener('mousedown', (e) => { isResizing = true; document.body.style.cursor = 'col-resize'; resizer.classList.add('resizing'); e.preventDefault(); });
+    document.addEventListener('mousemove', (e) => { if (!isResizing) return; let newWidth = e.clientX; if (newWidth < 300) newWidth = 300; if (newWidth > 800) newWidth = 800; sidebar.style.width = newWidth + 'px'; });
+    document.addEventListener('mouseup', () => { if (isResizing) { isResizing = false; document.body.style.cursor = 'default'; resizer.classList.remove('resizing'); } });
+  })();
+</script>
+</body>
+</html>

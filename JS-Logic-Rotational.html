@@ -1,0 +1,259 @@
+<script>
+// Plik: JS-Logic-Rotational.html
+// Moduł: Logika Rotacyjna (Auto-Wybór, Zapis, Wykluczenia)
+// Funkcje: handleRotationalAutoSelect, handleRotationalSubmit, handleToggleExclusion
+// Wersja: Persistent Selection + Skills Matrix Filtering
+
+console.log("Ładowanie modułu Logic Rotational...");
+
+// =====================================================
+// === UNIWERSALNA LOGIKA ROTACYJNA ===
+// =====================================================
+
+// 1. AUTO-WYBÓR (Batch Mode)
+function handleRotationalAutoSelect() {
+  const numToSelect = parseInt(dom.stowNumToSelect.value);
+  if (isNaN(numToSelect) || numToSelect <= 0) { 
+    showToast("Podaj poprawną ilość osób.", 'error'); 
+    return; 
+  }
+  
+  let batchFloor = null;
+  let batchBreak = null;
+  let batchRole = null; 
+  
+  const mode = state.currentMode;
+
+  // Walidacja i pobieranie parametrów grupowych
+  if (mode === 'stow') {
+     batchFloor = dom.stowBatchFloor ? dom.stowBatchFloor.value : '';
+     if (!batchFloor || batchFloor === "" || batchFloor.includes("Piętro")) { 
+        showToast("Wybierz piętro (100-104 lub 400-404).", 'error'); 
+        return; 
+     }
+     batchBreak = dom.stowBatchBreak ? dom.stowBatchBreak.value : '';
+  } 
+  else if (mode === 'missions' || mode === 'support') {
+     batchRole = dom.batchRoleSelect ? dom.batchRoleSelect.value : '';
+     if (!batchRole || batchRole === "") {
+        showToast("Wybierz rolę dla grupy.", 'error');
+        return;
+     }
+  }
+  
+  // Mapa szkoleń (UI Name -> Skills Key)
+  const skillsMap = {
+      'unloading': 'unloading',
+      'receive': 'receive',
+      'stow': 'stow',
+      'sort': 'sort',
+      'pack': 'pack',
+      'shipping': 'shipping',
+      'zwroty': 'returns',
+      'jakość': 'quality',
+      'beauty': 'beauty',
+      'carty': 'carts',
+      'wózki': 'carts'
+  };
+
+  // Ustalanie klucza wymaganego szkolenia
+  let requiredSkillKey = null;
+  if (batchRole) {
+      const lowerRole = batchRole.toLowerCase();
+      // Sprawdzamy czy nazwa roli zawiera kluczowe słowa
+      for (const [uiKey, dataKey] of Object.entries(skillsMap)) {
+          if (lowerRole.includes(uiKey)) {
+              requiredSkillKey = dataKey;
+              break;
+          }
+      }
+  }
+
+  // Sprawdź czy wymuszamy kolizje
+  const ignoreCollisions = dom.batchIgnoreCollisions && dom.batchIgnoreCollisions.checked;
+  
+  if (!dom.unifiedList) return;
+  
+  const allRows = Array.from(dom.unifiedList.children);
+  let selectedCount = 0;
+  let skippedCollisionCount = 0;
+  let forcedCollisionCount = 0;
+  let skippedSkillCount = 0; // Licznik osób bez szkolenia
+  
+  allRows.forEach(row => {
+    if (selectedCount >= numToSelect) return;
+    
+    const name = row.dataset.name;
+    if (!name) return;
+
+    // Sprawdź czy już jest w pamięci (persistent)
+    const isAlreadySelected = state.pendingAssignments.has(name);
+    if (isAlreadySelected) return; 
+
+    // Znajdź dane pracownika w stanie (aby sprawdzić skills)
+    const empData = (state.stowData || []).find(e => e.name === name);
+    
+    // --- FILTR SZKOLENIA ---
+    if (requiredSkillKey && empData && empData.skills) {
+        if (!empData.skills[requiredSkillKey]) {
+            skippedSkillCount++;
+            return; // Pomiń pracownika bez szkolenia
+        }
+    }
+
+    const checkbox = row.querySelector('.stow-checkbox');
+    const paramInput1 = row.querySelector('.assignment-param-1'); // Przerwa / Rola
+    const paramInput2 = row.querySelector('.assignment-param-2'); // Piętro
+    
+    // Jeśli pracownik nie jest wykluczony (checkbox enabled)
+    if (checkbox && !checkbox.disabled) {
+        
+       // --- SPRAWDZANIE KOLIZJI ---
+       const collisionInfo = (typeof findActiveAssignment === 'function') ? findActiveAssignment(name) : null;
+       
+       if (collisionInfo) {
+           if (!ignoreCollisions) {
+               skippedCollisionCount++;
+               return; 
+           } else {
+               forcedCollisionCount++;
+           }
+       }
+       // ----------------------------------
+
+       // 1. Zaznaczamy w UI
+       checkbox.checked = true;
+       row.classList.add('bg-blue-50');
+       row.classList.remove('bg-white');
+       
+       // 2. Przygotuj wartości
+       let val1 = ''; // Break / Role
+       let val2 = ''; // Floor
+
+       if (mode === 'stow') {
+          val2 = batchFloor;
+          val1 = batchBreak;
+          
+          if (paramInput2) paramInput2.value = batchFloor; 
+          if (paramInput1) paramInput1.value = batchBreak; 
+       } 
+       else if (mode === 'missions' || mode === 'support') {
+          val1 = batchRole;
+          if (paramInput1) paramInput1.value = batchRole;
+       }
+
+       // 3. ZAPIS DO PAMIĘCI
+       state.pendingAssignments.set(name, { break: val1, floor: val2 });
+       
+       selectedCount++;
+    }
+  });
+  
+  // Komunikaty
+  if (selectedCount === 0) {
+      if (skippedSkillCount > 0) {
+          showToast(`Nie znaleziono kandydatów. ${skippedSkillCount} osób pominięto z powodu braku szkolenia "${batchRole}".`, 'warning');
+      } else if (skippedCollisionCount > 0) {
+          showToast(`Nie zaznaczono nikogo. Pominięto ${skippedCollisionCount} osób z powodu kolizji.`, 'info');
+      } else {
+          showToast("Brak dostępnych kandydatów do zaznaczenia.", 'info');
+      }
+  } else {
+      let msg = `Auto: zaznaczono ${selectedCount} osób.`;
+      
+      if (skippedSkillCount > 0) msg += ` (Brak szkolenia: ${skippedSkillCount}).`;
+      if (skippedCollisionCount > 0) msg += ` (Zajęci: ${skippedCollisionCount}).`;
+      if (forcedCollisionCount > 0) msg += ` (Wymuszono: ${forcedCollisionCount}).`;
+      
+      showToast(msg, 'success');
+      
+      // Aktualizuj liczniki
+      if(typeof updateActionCount === 'function') updateActionCount();
+      if(typeof updateClearButtonVisibility === 'function') updateClearButtonVisibility(); 
+  }
+}
+
+// 2. ZAPIS (Submit)
+function handleRotationalSubmit() {
+  const mode = state.currentMode;
+  
+  if (!state.pendingAssignments || state.pendingAssignments.size === 0) {
+      showToast("Nie wybrano nikogo.", 'error');
+      return;
+  }
+  
+  const assignments = [];
+  
+  state.pendingAssignments.forEach((data, name) => {
+      let val1 = data.break || '';
+      let val2 = data.floor || '';
+      
+      if (mode === 'stow') {
+         if (val1 === '--' || val1 === '') val1 = 'Gr';
+         if (val2 === '--') val2 = '';
+      }
+      
+      assignments.push({ name: name, break: val1, floor: val2 });
+  });
+  
+  if(dom.mainActionBtn) {
+    dom.mainActionBtn.disabled = true;
+    dom.mainActionBtn.innerHTML = '<div class="loader-btn"></div> Zapisywanie...';
+  }
+
+  google.script.run
+    .withSuccessHandler(res => {
+      showToast(res.message, 'success');
+      
+      if(dom.mainActionBtn) {
+         dom.mainActionBtn.innerHTML = '<span id="mainActionText">Zapisz Przydział</span>';
+         dom.mainActionBtn.disabled = false;
+      }
+      
+      if (state.widgets && state.widgets[mode]) {
+         if (!state.widgets[mode].today) state.widgets[mode].today = [];
+         assignments.forEach(a => { 
+            state.widgets[mode].today.push({ name: a.name, break: a.break, floor: a.floor }); 
+         });
+         if (typeof renderStowersWidgetUI === 'function') renderStowersWidgetUI();
+      }
+      
+      if (typeof loadRotationalData === 'function') loadRotationalData();
+      if (typeof clearEmployeeSelection === 'function') clearEmployeeSelection();
+    })
+    .withFailureHandler(err => {
+      console.error(err);
+      showToast("Błąd zapisu: " + err.message, 'error');
+      if(dom.mainActionBtn) {
+         dom.mainActionBtn.innerHTML = '<span id="mainActionText">Zapisz Przydział</span>';
+         dom.mainActionBtn.disabled = false;
+      }
+    })
+    .processRotationalAssignments(mode, assignments);
+}
+
+// 3. WYKLUCZANIE (Toggle Exclusion) - PER TRYB
+function handleToggleExclusion(name) {
+  const decodedName = name.replace(/\\'/g, "'").replace(/&quot;/g, '"');
+  const emp = (state.stowData || []).find(e => e.name === decodedName);
+  
+  const currentMode = state.currentMode;
+
+  if (emp) {
+    emp.isExcluded = !emp.isExcluded;
+    
+    state.stowData.sort((a, b) => {
+        if (a.isExcluded !== b.isExcluded) return (a.isExcluded ? 1 : 0) - (b.isExcluded ? 1 : 0);
+        if (a.wasToday !== b.wasToday) return (a.wasToday ? 1 : 0) - (b.wasToday ? 1 : 0);
+        if (a.weekCount !== b.weekCount) return a.weekCount - b.weekCount;
+        return a.name.localeCompare(b.name, 'pl');
+    });
+    
+    if(typeof renderUnifiedList === 'function') renderUnifiedList();
+  }
+  
+  google.script.run
+    .withFailureHandler(e => showToast("Błąd wykluczania: " + e.message, 'error'))
+    .toggleExclusion(decodedName, currentMode);
+}
+</script>

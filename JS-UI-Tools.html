@@ -1,0 +1,82 @@
+<script>
+// Plik: JS-UI-Tools.html
+// Moduł: Narzędzia UI (Powiadomienia, Kolory, Helpery)
+
+console.log("Ładowanie modułu UI Tools...");
+
+// =====================================================
+// === SYSTEM POWIADOMIEŃ (TOAST) ===
+// =====================================================
+
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  
+  let icon = '';
+  if (type === 'success') {
+    icon = '<svg class="w-5 h-5 text-emerald-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+  } else if (type === 'error') {
+    icon = '<svg class="w-5 h-5 text-rose-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+  } else {
+    icon = '<svg class="w-5 h-5 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+  }
+
+  toast.innerHTML = `<div class="flex items-center">${icon}<span>${message}</span></div>`;
+  
+  container.appendChild(toast);
+  
+  // Automatyczne usuwanie po 3 sekundach
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(100%)';
+    toast.style.transition = 'all 0.3s ease-in';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// Wrapper dla błędów
+function showErrorUI(m) {
+  showToast(m, 'error');
+}
+
+// Obsługa błędów serwerowych
+function handleServerError(e, m = "Błąd") {
+  console.error("Critical:", e);
+  const msg = m + ": " + (e && e.message ? e.message : e);
+  if (typeof showToast === 'function') {
+    showToast(msg, 'error');
+  } else {
+    alert(msg); // Fallback przed pełnym załadowaniem UI
+  }
+}
+
+// =====================================================
+// === HEATMAPA (KOLORY LICZNIKÓW) ===
+// =====================================================
+
+function getHeatColor(val, type) {
+  if (val === 0 || val === undefined) return 'bg-white text-slate-300 border border-slate-100';
+  
+  // Limity dla kolorów (można dostosować)
+  // Tydzień: >2 to dużo (czerwony)
+  // Miesiąc: >8 to dużo (czerwony)
+  const limit = type === 'week' ? 2 : 8; 
+  
+  if (val <= limit) return 'heat-low'; // Zielony (Preferowany)
+  if (val <= limit * 2) return 'heat-med'; // Żółty (Średni)
+  return 'heat-high font-bold'; // Czerwony (Przeciążony)
+}
+
+// =====================================================
+// === FORMATOWANIE WIZUALNE ===
+// =====================================================
+
+function getPriorityDot(p) {
+  const c = p === 'Wysoki' ? 'bg-red-500' : (p === 'Niski' ? 'bg-green-500' : 'bg-yellow-500');
+  return `<span class="inline-block w-2 h-2 rounded-full mr-1.5 ${c}" title="${p}"></span>`;
+}
+
+</script>

@@ -1,0 +1,171 @@
+<script>
+// Plik: JS-State.html
+// Wersja: Smart Cache Fallback State
+
+const state = {
+  // Dane
+  employees: [],
+  // NOWE: Metadane o źródle danych pracowników (LIVE vs CACHE)
+  employeeMeta: { 
+      source: 'NONE', // 'LIVE', 'CACHE', 'NONE'
+      date: null,     // String sformatowany
+      timestamp: 0    // Timestamp JS
+  },
+  showOldDataConfirmed: false, // Flaga: czy użytkownik potwierdził, że chce widzieć stare dane z Cache
+
+  tasks: [],
+  stowData: [],
+  planningData: [], // Dane z planowania UB8 (Beauty)
+  groupStats: null, // Statystyki grupy i plan tygodniowy
+  
+  // Struktura widgetów
+  widgets: {
+      stow: { today: [], recent: [], recentDateLabel: '' },
+      carts: { today: [], recent: [], recentDateLabel: '' },
+      missions: { today: [], recent: [], recentDateLabel: '' },
+      support: { today: [], recent: [], recentDateLabel: '' },
+      beauty: { today: [], recent: [], recentDateLabel: '' } 
+  },
+  
+  // Kontekst
+  currentUserEmail: '',
+  currentCategory: 'Dla pracownika',
+  currentMode: 'tasks', 
+
+  // Flagi widoków
+  isEmployeeTaskMode: true, 
+  
+  // Stan interfejsu
+  selectedEmployeeNames: new Set(), // Dla trybu zadań
+  pendingAssignments: new Map(), // Dla trybów rotacyjnych (Trwałe zaznaczenie + parametry)
+  
+  taskToDelete: { id: null, isBulk: false },
+  taskToEditId: null,
+  selectedTaskIds: new Set(),
+  activeReplyEdit: { taskId: null, timestamp: null },
+  
+  // Stan kolizji
+  pendingCollision: {
+      name: null,
+      checkbox: null 
+  },
+  
+  // Stan Widgetu Beauty / Kalendarza
+  beautyDayOffset: 0, 
+  calendarOffset: 0,  
+  calendarData: null, 
+  isCalendarFetching: false,
+
+  isDataLoaded: false,
+  isStowLoaded: false,
+
+  // === USTAWIENIA ===
+  settings: {
+      defaultMode: 'tasks', 
+      userGroup: '', // Grupa użytkownika (A-H)
+      customRoles: {
+          support: ['Unloading', 'Receive', 'Pack', 'Shipping', 'Zwroty', 'Jakość', 'Problem Solver'], 
+          missions: ['Kartony', 'X-info', 'Sprzątanie', 'Bufory'] 
+      }
+  }
+};
+
+const dom = {
+  app: document.getElementById('app'),
+  
+  // Sidebar Controls
+  globalSearch: document.getElementById('globalSearch'),
+  modeSelector: document.getElementById('modeSelector'),
+  modeTitle: document.getElementById('modeTitle'),
+  stowStatsLegend: document.getElementById('stowStatsLegend'),
+  
+  // Przycisk odznaczania
+  clearSelectionBtn: document.getElementById('clearSelectionBtn'),
+  
+  // Containers
+  unifiedList: document.getElementById('unifiedList'),
+  footerTasks: document.getElementById('footerTasks'),
+  footerAction: document.getElementById('footerAction'),
+  
+  // Tasks Form
+  taskForm: document.getElementById('taskForm'),
+  formTitle: document.getElementById('formTitle'),
+  taskDescription: document.getElementById('taskDescription'),
+  taskDeadline: document.getElementById('taskDeadline'),
+  taskPriority: document.getElementById('taskPriority'),
+  addTaskBtn: document.getElementById('addTaskBtn'),
+  formError: document.getElementById('formError'),
+  categoryButtons: document.querySelectorAll('.category-btn'),
+  taskEmptyState: document.getElementById('taskEmptyState'),
+
+  // Action Footer (Batch Controls)
+  actionCount: document.getElementById('actionCount'),
+  mainActionBtn: document.getElementById('mainActionBtn'),
+  mainActionText: document.getElementById('mainActionText'),
+  
+  batchControls: document.getElementById('batchControls'), 
+  stowAutoSelectBtn: document.getElementById('stowAutoSelectBtn'),
+  stowNumToSelect: document.getElementById('stowNumToSelect'),
+  stowBatchFloor: document.getElementById('stowBatchFloor'),
+  stowBatchBreak: document.getElementById('stowBatchBreak'), 
+  batchRoleSelect: document.getElementById('batchRoleSelect'),
+  batchIgnoreCollisions: document.getElementById('batchIgnoreCollisions'),
+
+  // Right Panel
+  taskList: document.getElementById('taskList'),
+  taskSearch: document.getElementById('taskSearch'),
+  
+  // Nav
+  navEmployee: document.getElementById('navEmployee'),
+  navBriefing: document.getElementById('navBriefing'),
+  navPersonal: document.getElementById('navPersonal'),
+  
+  // Modals - Standardowe
+  deleteModal: document.getElementById('deleteModal'),
+  deleteModalText: document.getElementById('deleteModalText'),
+  confirmDeleteBtn: document.getElementById('confirmDelete'),
+  cancelDeleteBtn: document.getElementById('cancelDelete'),
+  editModal: document.getElementById('editModal'),
+  saveChangesBtn: document.getElementById('saveChangesBtn'),
+  cancelEditBtn: document.getElementById('cancelEditBtn'),
+  editDescription: document.getElementById('editDescription'),
+  editDeadline: document.getElementById('editDeadline'),
+  editPriority: document.getElementById('editPriority'),
+  historyModal: document.getElementById('historyModal'),
+  historyModalTitle: document.getElementById('historyModalTitle'),
+  closeHistoryBtn: document.getElementById('closeHistoryBtn'),
+  historyList: document.getElementById('historyList'),
+  
+  // Bulk Actions
+  bulkActionContainer: document.getElementById('bulkActionContainer'),
+  selectedCount: document.getElementById('selectedCount'),
+  bulkCompleteBtn: document.getElementById('bulkCompleteBtn'),
+  bulkDeleteBtn: document.getElementById('bulkDeleteBtn'),
+
+  // === MODAL USTAWIENIA ===
+  settingsBtn: document.getElementById('settingsBtn'),
+  settingsModal: document.getElementById('settingsModal'),
+  closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+  saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+  
+  settingsDefaultMode: document.getElementById('settingsDefaultMode'),
+  settingsUserGroup: document.getElementById('settingsUserGroup'),
+  
+  rolesSupportList: document.getElementById('rolesSupportList'),
+  newSupportRole: document.getElementById('newSupportRole'),
+  addSupportRoleBtn: document.getElementById('addSupportRoleBtn'),
+  
+  rolesMissionsList: document.getElementById('rolesMissionsList'),
+  newMissionRole: document.getElementById('newMissionRole'),
+  addMissionRoleBtn: document.getElementById('addMissionRoleBtn'),
+
+  // Import Grafiku UI
+  importScheduleText: document.getElementById('importScheduleText'), 
+  importScheduleBtn: document.getElementById('importScheduleBtn'), 
+
+  // === MODAL KOLIZJI ===
+  collisionModal: document.getElementById('collisionModal'),
+  collisionModalText: document.getElementById('collisionModalText'),
+  confirmCollisionBtn: document.getElementById('confirmCollisionBtn')
+};
+</script>

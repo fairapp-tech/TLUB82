@@ -1,0 +1,148 @@
+<script>
+// Plik: JS-Logic-Shared.html
+// Moduł: Logika Wspólna (Czyszczenie, Kategorie, UI Helpery)
+// Funkcje: clearEmployeeSelection, handleCategorySwitch, updateClearButtonVisibility
+
+console.log("Ładowanie modułu Logic Shared...");
+
+// =====================================================
+// === HELPERY PRZEŁĄCZANIA KATEGORII & ZAZNACZEŃ ===
+// =====================================================
+
+function clearEmployeeSelection() {
+    // 1. Czyść Zbiór (Zadania)
+    if (state.selectedEmployeeNames) state.selectedEmployeeNames.clear();
+    
+    // 2. Czyść Mapę Rotacyjną (NOWE - Persistent Selection)
+    if (state.pendingAssignments) state.pendingAssignments.clear();
+    
+    // 3. Czyść Checkboxy Zadań
+    document.querySelectorAll('.task-checkbox').forEach(c => {
+        c.checked = false;
+        const row = c.closest('div[data-name]');
+        if (row) {
+            row.classList.remove('checked');
+            row.classList.remove('bg-blue-50');
+        }
+    });
+
+    // 4. Czyść Checkboxy Rotacyjne (STOW/Inne)
+    // UWAGA: Przy "Persistent Selection" to tylko wizualne czyszczenie, 
+    // stan faktyczny jest w pendingAssignments (wyczyszczonym w pkt 2)
+    document.querySelectorAll('.stow-checkbox').forEach(c => {
+        c.checked = false;
+        const row = c.closest('div[data-name]');
+        if (row) {
+            row.classList.remove('bg-blue-50');
+            row.classList.add('bg-white');
+        }
+        
+        // Reset selectów do domyślnych
+        if (row) {
+            const s1 = row.querySelector('.assignment-param-1');
+            const s2 = row.querySelector('.assignment-param-2');
+            if(s1) s1.selectedIndex = 0;
+            if(s2) s2.selectedIndex = 0;
+        }
+    });
+
+    // 5. Aktualizuj UI
+    if (typeof updateFormStateUI === 'function') updateFormStateUI();
+    if (typeof updateActionCount === 'function') updateActionCount();
+    updateClearButtonVisibility();
+}
+
+function updateClearButtonVisibility() {
+    if (!dom.clearSelectionBtn) return;
+
+    let count = 0;
+    if (state.currentMode === 'tasks') {
+        count = state.selectedEmployeeNames ? state.selectedEmployeeNames.size : 0;
+    } else {
+        // W trybie rotacyjnym liczymy elementy w pamięci (Persistent) lub checkboxy (Fallback)
+        if (state.pendingAssignments && state.pendingAssignments.size > 0) {
+            count = state.pendingAssignments.size;
+        } else if (dom.unifiedList) {
+            count = dom.unifiedList.querySelectorAll('.stow-checkbox:checked').length;
+        }
+    }
+
+    if (count > 0) {
+        dom.clearSelectionBtn.classList.remove('hidden');
+        dom.clearSelectionBtn.textContent = `Odznacz (${count})`;
+    } else {
+        dom.clearSelectionBtn.classList.add('hidden');
+    }
+}
+
+function setActiveCategoryButtonUI(targetButton) {
+    const btns = document.querySelectorAll('.category-btn');
+    btns.forEach(b => {
+        b.classList.remove('active-category', 'bg-blue-600', 'text-white');
+        b.classList.add('text-slate-600', 'hover:bg-slate-50'); 
+    });
+    
+    targetButton.classList.add('active-category', 'bg-blue-600', 'text-white');
+    targetButton.classList.remove('text-slate-600', 'hover:bg-slate-50');
+}
+
+function handleCategorySwitch(newCategory, currentButton) {
+    const oldCategory = state.currentCategory;
+    const isSwitchingAway = oldCategory === 'Dla pracownika' && newCategory !== 'Dla pracownika';
+    
+    if (isSwitchingAway && state.selectedEmployeeNames.size > 0) {
+        const count = state.selectedEmployeeNames.size;
+        const confirmMsg = `UWAGA! ${count} pracowników jest zaznaczonych. Czy na pewno chcesz zrezygnować z przydziału zadań dla tych osób? Zaznaczenie zostanie utracone.`;
+        
+        if (!confirm(confirmMsg)) return;
+        
+        clearEmployeeSelection();
+    }
+    
+    state.currentCategory = newCategory;
+    state.isEmployeeTaskMode = newCategory === 'Dla pracownika';
+
+    setActiveCategoryButtonUI(currentButton);
+    if(typeof updateFormStateUI === 'function') updateFormStateUI();
+    
+    // Jeśli jesteśmy w trybie zadań, odświeżamy listę, aby zablokować/odblokować interakcję
+    if (state.currentMode === 'tasks' && typeof renderUnifiedList === 'function') {
+        renderUnifiedList();
+    }
+    updateClearButtonVisibility();
+}
+
+// === UTILS ===
+function updateActionCount() {
+  if (!dom.unifiedList || !dom.actionCount) return;
+  
+  // Licznik bierze z pamięci (Persistent) lub z DOM (Fallback)
+  let count = 0;
+  if (state.pendingAssignments) {
+      count = state.pendingAssignments.size;
+  } else {
+      count = dom.unifiedList.querySelectorAll('.stow-checkbox:checked').length;
+  }
+  
+  dom.actionCount.textContent = count;
+  
+  if(dom.mainActionBtn) {
+    dom.mainActionBtn.disabled = (count === 0);
+    if (count === 0) dom.mainActionBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    else dom.mainActionBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+  }
+}
+
+// === SAMO-NAPRAWIAJĄCA INICJALIZACJA KATEGORII ===
+document.addEventListener('DOMContentLoaded', () => {
+    const btns = document.querySelectorAll('.category-btn');
+    if(btns.length > 0) {
+        btns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const newCategory = e.currentTarget.dataset.category;
+                handleCategorySwitch(newCategory, e.currentTarget);
+            });
+        });
+    }
+});
+</script>

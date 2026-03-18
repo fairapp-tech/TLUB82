@@ -1,0 +1,418 @@
+<script>
+// Plik: JS-Logic-Tasks.html
+// Moduł: Logika Zadań (Dodawanie, Edycja, Usuwanie, Komentarze)
+// Funkcje: handleAddTask, handleCompleteTasks, handleConfirmDelete, etc.
+// Wersja: Announcements Logic Added
+
+console.log("Ładowanie modułu Logic Tasks...");
+
+// =====================================================
+// === LOGIKA ZADAŃ (TASKS) - DODAWANIE ===
+// =====================================================
+
+function handleAddTask(){ 
+    const d = dom.taskDescription ? dom.taskDescription.value.trim() : ''; 
+    if(!d){ showToast("Wpisz treść zadania!", 'error'); return; } 
+    
+    let employees = [];
+    
+    if (state.currentCategory === 'Dla pracownika') {
+        employees = Array.from(state.selectedEmployeeNames);
+        if(employees.length === 0){ 
+           showToast("Wybierz pracownika z listy.", 'error'); 
+           return; 
+        } 
+    } else if (state.currentCategory === 'Na odprawę') {
+        employees = ['Odprawa']; 
+    } else if (state.currentCategory === 'Ogłoszenia') {
+        employees = ['Ogłoszenia']; // Nowa kategoria
+    } else {
+        employees = ['Osobiste']; 
+    }
+
+    const td = {
+        description: d,
+        deadline: dom.taskDeadline ? dom.taskDeadline.value : '',
+        priority: dom.taskPriority ? dom.taskPriority.value : 'Normalny',
+        category: state.currentCategory,
+        employees: employees
+    }; 
+    
+    setFormLoadingStateUI(true); 
+    
+    google.script.run.withSuccessHandler(ts => {
+        ts.forEach(t => { state.tasks.push(t); });
+        if(typeof renderAllTasks === 'function') renderAllTasks(); 
+        resetForm();
+        setFormLoadingStateUI(false);
+        showToast("Dodano zadanie!", 'success');
+    }).withFailureHandler(err => {
+        setFormLoadingStateUI(false);
+        showToast("Błąd dodawania: " + err.message, 'error');
+    }).addTask(td); 
+}
+
+function resetForm() { 
+  if(dom.taskDescription) dom.taskDescription.value = ''; 
+  // clearEmployeeSelection jest w JS-Logic-Shared
+  if(typeof clearEmployeeSelection === 'function') clearEmployeeSelection(); 
+  updateFormStateUI(); 
+}
+
+// =====================================================
+// === LOGIKA ZADAŃ - AKCJE (REALIZACJA / USUWANIE / EDYCJA) ===
+// =====================================================
+
+function handleCompleteTasks(ids) {
+    if (!ids || ids.length === 0) return;
+    
+    if(dom.bulkCompleteBtn) {
+        dom.bulkCompleteBtn.disabled = true;
+        dom.bulkCompleteBtn.textContent = "...";
+    }
+
+    google.script.run
+      .withSuccessHandler(() => {
+          ids.forEach(id => {
+              const t = state.tasks.find(x => x.taskId === id);
+              if (t) t.status = 'Zrealizowano';
+          });
+          state.selectedTaskIds.clear();
+          if (typeof renderAllTasks === 'function') renderAllTasks();
+          if (dom.bulkCompleteBtn) {
+              dom.bulkCompleteBtn.disabled = false;
+              dom.bulkCompleteBtn.textContent = "Zrealizuj";
+          }
+          showToast("Zadania oznaczone jako zrealizowane.", 'success');
+      })
+      .withFailureHandler(err => {
+          showToast("Błąd: " + err.message, 'error');
+          if (dom.bulkCompleteBtn) {
+              dom.bulkCompleteBtn.disabled = false;
+              dom.bulkCompleteBtn.textContent = "Zrealizuj";
+          }
+      })
+      .updateTaskStatuses(ids, 'Zrealizowano');
+}
+
+function handleConfirmDelete() {
+    const { id, isBulk } = state.taskToDelete;
+    const idsToDelete = isBulk ? id : [id];
+    if (!idsToDelete || idsToDelete.length === 0) return;
+    
+    if(dom.confirmDeleteBtn) {
+        dom.confirmDeleteBtn.disabled = true;
+        dom.confirmDeleteBtn.textContent = "Usuwanie...";
+    }
+
+    google.script.run
+      .withSuccessHandler(() => {
+          state.tasks = state.tasks.filter(t => !idsToDelete.includes(t.taskId));
+          state.selectedTaskIds.clear();
+          if (typeof closeDeleteModalUI === 'function') closeDeleteModalUI();
+          if (typeof renderAllTasks === 'function') renderAllTasks();
+          if(dom.confirmDeleteBtn) {
+             dom.confirmDeleteBtn.disabled = false;
+             dom.confirmDeleteBtn.textContent = "Usuń";
+          }
+          showToast("Usunięto pomyślnie.", 'success');
+      })
+      .withFailureHandler(err => {
+          showToast("Błąd usuwania: " + err.message, 'error');
+          if(dom.confirmDeleteBtn) {
+             dom.confirmDeleteBtn.disabled = false;
+             dom.confirmDeleteBtn.textContent = "Usuń";
+          }
+      })
+      .deleteTasksByIds(idsToDelete);
+}
+
+function handleSaveChanges() {
+    const id = state.taskToEditId;
+    if (!id) return;
+    
+    let deadlineStr = '';
+    if (dom.editDeadline && dom.editDeadline.value) {
+        const [y, m, d] = dom.editDeadline.value.split('-');
+        deadlineStr = `${d}.${m}.${y}`;
+    }
+
+    const updatedData = {
+        taskId: id,
+        description: dom.editDescription ? dom.editDescription.value : '',
+        priority: dom.editPriority ? dom.editPriority.value : 'Normalny',
+        deadline: deadlineStr
+    };
+    
+    if(dom.saveChangesBtn) {
+        dom.saveChangesBtn.disabled = true;
+        dom.saveChangesBtn.textContent = "Zapisywanie...";
+    }
+
+    google.script.run
+      .withSuccessHandler(res => {
+          const idx = state.tasks.findIndex(t => t.taskId === id);
+          if (idx !== -1) {
+              state.tasks[idx] = res;
+          }
+          if (typeof closeEditModalUI === 'function') closeEditModalUI();
+          if (typeof renderAllTasks === 'function') renderAllTasks();
+          if(dom.saveChangesBtn) {
+             dom.saveChangesBtn.disabled = false;
+             dom.saveChangesBtn.textContent = "Zapisz";
+          }
+          showToast("Zaktualizowano zadanie.", 'success');
+      })
+      .withFailureHandler(err => {
+          showToast("Błąd edycji: " + err.message, 'error');
+          if(dom.saveChangesBtn) {
+             dom.saveChangesBtn.disabled = false;
+             dom.saveChangesBtn.textContent = "Zapisz";
+          }
+      })
+      .updateTask(updatedData);
+}
+
+// =====================================================
+// === OBSŁUGA KOMENTARZY (REPLIES) ===
+// =====================================================
+
+function toggleTaskReplies(taskId) {
+    const replyRow = document.querySelector(`tr[data-reply-for="${taskId}"]`);
+    if (!replyRow) return;
+    
+    if (replyRow.classList.contains('hidden')) {
+        replyRow.classList.remove('hidden');
+        renderReplies(taskId);
+    } else {
+        replyRow.classList.add('hidden');
+    }
+}
+
+function renderReplies(taskId) {
+    const task = state.tasks.find(t => t.taskId === taskId);
+    const replyRow = document.querySelector(`tr[data-reply-for="${taskId}"]`);
+    if (!task || !replyRow) return;
+
+    const container = replyRow.querySelector('.replies-container');
+    const replies = task.replies || [];
+    
+    let html = '';
+    
+    // Lista komentarzy
+    if (replies.length > 0) {
+        html += '<ul class="space-y-3 mb-4">';
+        replies.forEach(r => {
+            let dateStr = r.timestamp;
+            try { 
+                const d = new Date(r.timestamp);
+                dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            } catch(e) {}
+
+            html += `
+                <li class="bg-white p-3 rounded-lg border border-slate-200 text-sm relative group">
+                    <div class="flex justify-between items-start mb-1">
+                        <span class="font-bold text-slate-700 text-xs">${r.creator || 'Użytkownik'}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] text-slate-400">${dateStr}</span>
+                            <button class="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" 
+                                    onclick="handleDeleteReply('${taskId}', '${r.timestamp}')" title="Usuń komentarz">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="text-slate-600 whitespace-pre-wrap">${r.text}</p>
+                </li>
+            `;
+        });
+        html += '</ul>';
+    } else {
+        html += '<p class="text-xs text-slate-400 italic mb-4 text-center">Brak komentarzy. Dodaj pierwszy!</p>';
+    }
+    
+    html += `
+        <div class="flex gap-2 items-start">
+            <textarea id="replyInput-${taskId}" class="flex-grow p-2 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-blue-500 bg-white" rows="1" placeholder="Napisz komentarz..."></textarea>
+            <button onclick="handleSubmitReply('${taskId}')" class="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 transition shadow-sm text-xs font-bold whitespace-nowrap">
+                Dodaj
+            </button>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+function handleSubmitReply(taskId) {
+    const input = document.getElementById(`replyInput-${taskId}`);
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+    
+    const btn = input.nextElementSibling;
+    const originalText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = '...';
+    
+    google.script.run
+        .withSuccessHandler(newReply => {
+            const task = state.tasks.find(t => t.taskId === taskId);
+            if (task) {
+                if (!task.replies) task.replies = [];
+                task.replies.push(newReply);
+                renderReplies(taskId);
+                if (typeof renderAllTasks === 'function') renderAllTasks();
+                setTimeout(() => toggleTaskReplies(taskId), 50);
+            }
+        })
+        .withFailureHandler(err => {
+            showToast("Błąd dodawania komentarza", 'error');
+            btn.disabled = false;
+            btn.innerText = originalText;
+        })
+        .addReply({ taskId: taskId, replyText: text });
+}
+
+function handleDeleteReply(taskId, timestamp) {
+    if (!confirm("Usunąć ten komentarz?")) return;
+    
+    google.script.run
+        .withSuccessHandler(() => {
+            const task = state.tasks.find(t => t.taskId === taskId);
+            if (task && task.replies) {
+                task.replies = task.replies.filter(r => r.timestamp !== timestamp);
+                renderReplies(taskId);
+                if (typeof renderAllTasks === 'function') renderAllTasks();
+                setTimeout(() => toggleTaskReplies(taskId), 50);
+            }
+        })
+        .withFailureHandler(err => showToast("Błąd usuwania", 'error'))
+        .deleteReply({ taskId: taskId, timestamp: timestamp });
+}
+
+// =====================================================
+// === OBSŁUGA LISTY ZADAŃ (CHECKBOXY & KLIKI) ===
+// =====================================================
+
+function handleTaskListChange(e) {
+    const target = e.target;
+    if (target.classList.contains('row-checkbox')) {
+        const row = target.closest('tr');
+        if (!row) return;
+        const taskId = row.dataset.taskId;
+        if (target.checked) {
+            state.selectedTaskIds.add(taskId);
+            row.classList.add('bg-blue-50');
+        } else {
+            state.selectedTaskIds.delete(taskId);
+            row.classList.remove('bg-blue-50');
+        }
+        if(typeof updateBulkActionUI === 'function') updateBulkActionUI();
+    }
+    if (target.classList.contains('section-checkbox')) {
+        const sectionId = target.dataset.sectionId;
+        const sectionBody = document.getElementById(sectionId + '-body');
+        if (sectionBody) {
+            const checkboxes = sectionBody.querySelectorAll('.row-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = target.checked;
+                const row = cb.closest('tr');
+                const taskId = row.dataset.taskId;
+                if (target.checked) {
+                    state.selectedTaskIds.add(taskId);
+                    row.classList.add('bg-blue-50');
+                } else {
+                    state.selectedTaskIds.delete(taskId);
+                    row.classList.remove('bg-blue-50');
+                }
+            });
+        }
+        if(typeof updateBulkActionUI === 'function') updateBulkActionUI();
+    }
+}
+
+function handleTaskListClick(e) {
+    if (e.target.type === 'checkbox') return;
+    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return; 
+    if (e.target.tagName === 'TEXTAREA') return;
+
+    const row = e.target.closest('tr[data-task-id]');
+    if (!row) return;
+    if (row.classList.contains('replies-row')) return;
+    
+    const taskId = row.dataset.taskId;
+    toggleTaskReplies(taskId);
+}
+
+// === ZARZĄDZANIE STANEM FORMULARZA ===
+
+function updateFormStateUI() {
+    if (!dom.addTaskBtn) return;
+    const isTargetMode = state.currentCategory === 'Dla pracownika';
+    const hasEmployees = state.selectedEmployeeNames.size > 0;
+    const shouldShowForm = (!isTargetMode) || (isTargetMode && hasEmployees);
+    
+    if (dom.taskForm && dom.taskEmptyState) {
+        if (shouldShowForm) {
+            dom.taskForm.classList.remove('hidden');
+            dom.taskEmptyState.classList.add('hidden');
+        } else {
+            dom.taskForm.classList.add('hidden');
+            dom.taskEmptyState.classList.remove('hidden');
+        }
+    }
+
+    if (dom.formTitle) {
+        if (state.currentCategory === 'Na odprawę') {
+            dom.formTitle.textContent = "Notatka na odprawę";
+            dom.formTitle.className = "text-xs font-bold text-indigo-600 uppercase tracking-wide";
+        } else if (state.currentCategory === 'Ogłoszenia') { // NOWE
+            dom.formTitle.textContent = "Dodaj ogłoszenie";
+            dom.formTitle.className = "text-xs font-bold text-teal-600 uppercase tracking-wide";
+        } else if (state.currentCategory === 'Osobista') {
+            dom.formTitle.textContent = "Notatka osobista / inna";
+            dom.formTitle.className = "text-xs font-bold text-amber-600 uppercase tracking-wide";
+        } else {
+            dom.formTitle.textContent = `Zaznacz ${state.selectedEmployeeNames.size} pracownik${state.selectedEmployeeNames.size === 1 ? 'a' : 'ów'}`;
+            dom.formTitle.className = "text-xs font-bold text-slate-500 uppercase tracking-wide";
+        }
+    }
+
+    const hasText = dom.taskDescription && dom.taskDescription.value.trim().length > 0;
+    let isValid = false;
+    let btnText = "Dodaj Zadanie";
+    
+    if (isTargetMode) {
+        if (!hasEmployees) btnText = "Wybierz pracownika";
+        else if (!hasText) btnText = "Wpisz treść";
+        else isValid = true;
+    } else {
+        if (!hasText) btnText = "Wpisz treść";
+        else isValid = true;
+    }
+    
+    dom.addTaskBtn.disabled = !isValid;
+    const txtSpan = dom.addTaskBtn.querySelector('#btnText');
+    if(txtSpan) txtSpan.textContent = btnText;
+    
+    if (isValid) dom.addTaskBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    else dom.addTaskBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    
+    // Zawsze aktualizuj stan przycisku czyszczenia
+    if(typeof updateClearButtonVisibility === 'function') updateClearButtonVisibility();
+}
+
+function setFormLoadingStateUI(isLoading) {
+    if (!dom.addTaskBtn) return;
+    const spinner = dom.addTaskBtn.querySelector('#btnSpinner');
+    const txt = dom.addTaskBtn.querySelector('#btnText');
+    if (isLoading) {
+        dom.addTaskBtn.disabled = true;
+        if(spinner) spinner.classList.remove('hidden');
+        if(txt) txt.classList.add('opacity-0');
+    } else {
+        if(spinner) spinner.classList.add('hidden');
+        if(txt) txt.classList.remove('opacity-0');
+        updateFormStateUI(); 
+    }
+}
+</script>

@@ -1,0 +1,507 @@
+<script>
+// Plik: JS-UI-Widgets.html
+// Moduł: Widgety Prawego Panelu (Rotacja, Beauty, Ostatnio, Info o Grupie, KALENDARZ)
+// Funkcje: renderStowersWidgetUI, setBeautyDay, handleWidgetDelete, calendar logic
+// Wersja: Turbo V19 (Beauty Undo UI Added)
+
+console.log("Ładowanie modułu UI Widgets...");
+
+// =====================================================
+// === WIDGETY ROTACYJNE (KARTY UJEDNOLICONE) ===
+// =====================================================
+
+function renderStowersWidgetUI() {
+  const container = document.getElementById('rotationalWidgets');
+  if (!container) return;
+
+  // Inicjalizacja stanów
+  if (typeof state.beautyDayOffset === 'undefined') state.beautyDayOffset = 0;
+  if (typeof state.calendarOffset === 'undefined') state.calendarOffset = 0;
+  if (typeof state.calendarData === 'undefined') state.calendarData = null;
+
+  container.innerHTML = ''; 
+  
+  // Obliczanie dzisiejszej daty dla etykiet
+  const todayDate = new Date();
+  const todayStr = todayDate.toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit' });
+  
+  // --- HELPER BUDOWANIA KARTY ---
+  const createCard = (titleHtml, countDisplay, colorClass, icon, content, isVisible = true) => {
+      if (!isVisible) return '';
+      return `
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow duration-200">
+            <div class="bg-slate-50 border-b border-slate-200 p-3.5 flex justify-between items-center shrink-0 h-[50px]">
+                <div class="flex items-center gap-2.5 overflow-hidden w-full mr-2">
+                    <span class="${colorClass} text-white w-7 h-7 flex items-center justify-center rounded shadow-sm shrink-0">${icon}</span>
+                    <div class="text-sm font-bold text-slate-700 uppercase tracking-wide flex-grow min-w-0 truncate">${titleHtml}</div>
+                </div>
+                ${(countDisplay !== null && countDisplay !== undefined) ? `<span class="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-0.5 rounded-full shadow-sm whitespace-nowrap min-w-[28px] text-center shrink-0" title="Suma">${countDisplay}</span>` : ''}
+            </div>
+            <div class="flex-grow overflow-y-auto custom-scrollbar bg-white" style="max-height: 500px;">${content}</div>
+        </div>
+      `;
+  };
+
+  const allWidgets = state.widgets || {};
+  const groupStats = state.groupStats || { total: 0, present: 0, trained: 0, availableStow: 0, plan: [], currentWeek: 0, currentShift: '', subgroups: { A: {total:0, present:0}, B: {total:0, present:0} } };
+  
+  const config = {
+    stow: { title: 'STOW', color: 'indigo', labelColor: 'bg-indigo-100 text-indigo-700' },
+    carts: { title: 'Carty', color: 'orange', labelColor: 'bg-orange-100 text-orange-700' }, 
+    missions: { title: 'Misje', color: 'purple', labelColor: 'bg-purple-100 text-purple-700' },
+    support: { title: 'Wsparcie', color: 'pink', labelColor: 'bg-pink-100 text-pink-700' },
+    beauty: { title: 'Beauty', color: 'fuchsia', labelColor: 'bg-fuchsia-100 text-fuchsia-700' }
+  };
+
+  // --- 1. KARTA ROTACJI "OBSADA DZIŚ" (BEZ BEAUTY) ---
+  let rotationContent = '';
+  let totalRotation = 0;
+  
+  // Kolejność wewnątrz "Obsada Dziś"
+  const displayOrder = ['stow', 'carts', 'missions', 'support'];
+
+  displayOrder.forEach(mode => {
+     const wData = allWidgets[mode];
+     if (wData && wData.today && wData.today.length > 0) {
+        totalRotation += wData.today.length;
+        const conf = config[mode] || { title: mode, color: 'gray', labelColor: 'bg-gray-100 text-gray-700' };
+        
+        let extraLabel = '';
+        if (mode === 'missions') {
+            extraLabel = '<span class="ml-2 text-[9px] text-slate-400 font-normal italic tracking-normal normal-case">(Multi / Nie blokuje)</span>';
+        }
+        
+        rotationContent += `
+          <div class="mb-4 last:mb-0">
+             <div class="flex justify-between items-center mb-2 px-1">
+                <div class="flex items-center">
+                    <span class="text-xs font-bold uppercase tracking-wide ${conf.labelColor} px-2 py-0.5 rounded">
+                    ${conf.title}
+                    </span>
+                    ${extraLabel}
+                </div>
+                <span class="text-xs text-slate-500 font-mono font-bold">${wData.today.length}</span>
+             </div>
+             ${buildSimpleList(wData.today, true, mode)}
+          </div>
+        `;
+     }
+  });
+
+  if (rotationContent === '') {
+     rotationContent = `<div class="h-32 flex items-center justify-center text-sm text-slate-400 italic">Brak przydziałów (oprócz Beauty).</div>`;
+  } else {
+     rotationContent = `<div class="py-2 px-1">${rotationContent}</div>`;
+  }
+  
+  // Ikony
+  const iconRotation = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
+  const iconBeauty = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>`;
+  
+  const cardRotation = createCard('Obsada Dziś', totalRotation, 'bg-blue-600', iconRotation, rotationContent);
+
+
+  // --- 2. DEDYKOWANA KARTA BEAUTY Z WERYFIKACJĄ ---
+  let beautyContent = '';
+  const beautyAssigned = allWidgets.beauty?.today || []; // Z bazy (już zapisani)
+  const beautyPlan = state.planningData || [];           // Z Planu (do weryfikacji)
+  const assignedNames = new Set(beautyAssigned.map(p => p.name.toLowerCase().trim()));
+  let missingInDb = [];
+  
+  // A. Jeśli mamy Plan - Tryb Weryfikacji
+  if (beautyPlan.length > 0) {
+      beautyContent += `<div class="p-2 space-y-1">`;
+      
+      beautyPlan.forEach(rawName => {
+          // Usuwanie (STOW) jeśli jest w nazwie z planu, ignorujemy też ostrzeżenia
+          if (rawName.includes("⚠️")) return;
+
+          const cleanName = rawName.replace(" (STOW)", "").trim();
+          const isAssigned = assignedNames.has(cleanName.toLowerCase());
+          
+          if (isAssigned) {
+              // ZGODA: Jest w planie i w bazie
+              beautyContent += `
+                  <div class="flex justify-between items-center text-xs p-1.5 bg-emerald-50 border border-emerald-100 rounded opacity-75">
+                      <span class="text-emerald-700 font-medium truncate flex-grow">${cleanName}</span>
+                      <span class="flex items-center text-[9px] font-bold text-emerald-600 bg-white px-1.5 py-0.5 rounded border border-emerald-100 ml-2">
+                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                        OK
+                      </span>
+                  </div>`;
+          } else {
+              // BRAK: Jest w planie, nie ma w bazie
+              missingInDb.push(cleanName);
+              beautyContent += `
+                  <div class="flex justify-between items-center text-xs p-1.5 bg-white border border-amber-200 rounded shadow-sm relative overflow-hidden group">
+                      <div class="absolute left-0 top-0 bottom-0 w-1 bg-amber-400"></div>
+                      <span class="text-slate-700 font-bold truncate pl-2 flex-grow">${cleanName}</span>
+                      <span class="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 ml-2">Do zapisu</span>
+                  </div>`;
+          }
+      });
+      
+      // Dodaj też osoby, które są w bazie, a nie ma ich w planie (dodane ręcznie)
+      beautyAssigned.forEach(p => {
+          // Sprawdzamy odwrotnie: czy osoba z bazy jest w planie?
+          const isInPlan = beautyPlan.some(pn => pn.replace(" (STOW)", "").trim().toLowerCase() === p.name.toLowerCase().trim());
+          if (!isInPlan) {
+               beautyContent += `
+                  <div class="flex justify-between items-center text-xs p-1.5 bg-slate-50 border border-slate-200 rounded opacity-75 mt-1">
+                      <span class="text-slate-500 font-medium truncate pl-1 flex-grow">${p.name}</span>
+                      <span class="text-[9px] text-slate-400 italic ml-2">Ręczny</span>
+                      <button class="ml-1 text-slate-300 hover:text-red-500 p-0.5" onclick="handleWidgetDelete('beauty', '${p.name}')" title="Usuń"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                  </div>`;
+          }
+      });
+
+      beautyContent += `</div>`;
+      
+      // PRZYCISK WERYFIKACJI
+      if (missingInDb.length > 0) {
+          // Escaping JSON for HTML attribute
+          const namesJson = JSON.stringify(missingInDb).replace(/"/g, '&quot;');
+          beautyContent += `
+              <div class="p-2 border-t border-slate-100 bg-slate-50 sticky bottom-0">
+                  <button onclick="handleVerifyAndSaveBeauty(${namesJson})" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3 rounded shadow-sm flex items-center justify-center gap-2 transition-colors animate-pulse">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                      Zapisz Brakujące (${missingInDb.length})
+                  </button>
+                  <p class="text-[9px] text-slate-400 text-center mt-1">Kliknij, aby zatwierdzić plan w systemie.</p>
+              </div>
+          `;
+      } else {
+           // --- NOWOŚĆ V19: Przycisk Anulowania ---
+           const planEntriesCount = beautyAssigned.filter(p => p.break === 'Plan').length;
+           
+           if (planEntriesCount > 0) {
+                beautyContent += `
+                  <div class="p-2 border-t border-amber-100 bg-amber-50/50 sticky bottom-0">
+                      <button onclick="handleUndoBeautyPlan()" class="w-full bg-white border border-amber-300 text-amber-700 hover:bg-amber-50 text-xs font-bold py-2 px-3 rounded shadow-sm flex items-center justify-center gap-2 transition-colors">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                          Anuluj Plan (${planEntriesCount})
+                      </button>
+                      <p class="text-[9px] text-amber-600/60 text-center mt-1">Usuwa automatyczne wpisy.</p>
+                  </div>
+               `;
+           } else {
+               beautyContent += `
+                  <div class="p-2 text-center border-t border-emerald-100 bg-emerald-50/50">
+                      <span class="text-[10px] text-emerald-600 font-bold flex items-center justify-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Plan zgodny z systemem
+                      </span>
+                  </div>
+              `;
+           }
+      }
+
+  } else {
+      // B. Brak Planu - Fallback do listy z bazy
+      if (beautyAssigned.length > 0) {
+           beautyContent = `<div class="py-2 px-1">${buildSimpleList(beautyAssigned, true, 'beauty')}</div>
+           <div class="text-[10px] text-slate-400 text-center italic pb-2 pt-2 border-t border-slate-50">Brak planu do weryfikacji.</div>`;
+      } else {
+           // C. Pusto wszędzie
+           beautyContent = `
+            <div class="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+                <div class="p-3 bg-fuchsia-50 rounded-full text-fuchsia-300">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <div>
+                    <p class="text-sm font-bold text-slate-600">Brak Obsady</p>
+                    <p class="text-xs text-slate-400 mt-1">
+                       Oczekiwanie na plan (13:30 / 21:30)<br>lub dodaj ręcznie w trybie Beauty.
+                    </p>
+                </div>
+                <button onclick="setBeautyDay(0, true)" class="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 text-[10px] font-bold rounded hover:bg-slate-50 transition shadow-sm">
+                    Wymuś pobranie planu
+                </button>
+            </div>
+           `;
+      }
+  }
+  
+  const beautyTitle = `Beauty <span class="text-[10px] font-medium text-fuchsia-100 ml-1 opacity-80">(Plan)</span>`;
+  // Używamy beautyAssigned.length do licznika w nagłówku (stan faktyczny w bazie), ale missing w body
+  const cardBeautyWidget = createCard(beautyTitle, beautyAssigned.length, 'bg-fuchsia-500', iconBeauty, beautyContent, true);
+
+
+  // --- 3. KARTA KALENDARZA ---
+  const userGroup = state.settings.userGroup;
+  let calendarCard = '';
+  
+  if (userGroup) {
+      let calendarInnerHtml = '';
+      const calData = state.calendarData;
+      
+      if (!calData) {
+          calendarInnerHtml = `<div class="h-64 flex flex-col items-center justify-center text-slate-400 space-y-2"><div class="loader-sm"></div><span class="text-xs">Ładowanie grafiku...</span></div>`;
+          if (!state.isCalendarFetching) {
+              fetchCalendarData(state.calendarOffset);
+          }
+      } else {
+          calendarInnerHtml = renderCalendarGrid(calData);
+      }
+
+      const monthLabel = calData ? calData.monthLabel : 'Grafik Pracy';
+      const calendarTitleHtml = `
+          <div class="flex items-center w-full justify-between gap-1">
+              <span class="truncate flex items-center gap-1">Grafik: ${userGroup} <span class="text-[9px] font-normal text-slate-400 bg-slate-100 px-1.5 rounded ml-1 border border-slate-200">${monthLabel}</span></span>
+              <div class="flex items-center gap-1 shrink-0 ml-1">
+                  <button class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-500 hover:text-blue-600 hover:border-blue-200" onclick="changeCalendarMonth(-1)">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                  </button>
+                  <button class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-500 hover:text-blue-600 hover:border-blue-200" onclick="changeCalendarMonth(1)">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+              </div>
+          </div>
+      `;
+      
+      const iconCalendar = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
+      calendarCard = createCard(calendarTitleHtml, null, 'bg-violet-500', iconCalendar, `<div class="p-2">${calendarInnerHtml}</div>`, true);
+  } else {
+      // Fallback jeśli nie wybrano grupy
+      calendarCard = createCard('Grafik', null, 'bg-slate-400', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/></svg>', 
+          `<div class="p-4 text-center text-slate-400 text-xs">Wybierz grupę w Ustawieniach, aby zobaczyć grafik.</div>`, true);
+  }
+
+  // --- 4. KARTA OSTATNIO ---
+  let targetMode = 'stow';
+  if (state.currentMode && state.currentMode !== 'tasks' && allWidgets[state.currentMode]) {
+     targetMode = state.currentMode;
+  }
+  const recentData = allWidgets[targetMode] || { recent: [], recentDateLabel: '' };
+  const recentConf = config[targetMode] || { title: targetMode, color: 'gray' };
+  const recentLabel = recentData.recentDateLabel || 'Brak';
+  const iconRecent = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+  const recentContent = `<div class="py-2 px-1">${buildSimpleList(recentData.recent, false, targetMode)}</div>`;
+  const cardRecent = createCard(`Ostatnio: ${recentConf.title}`, recentLabel, 'bg-slate-500', iconRecent, recentContent);
+
+  // --- 5. KARTA INFO O GRUPIE ---
+  const availableStow = groupStats.availableStow || 0;
+  const currentStowCount = state.widgets.stow?.today?.length || 0;
+  const remainingStow = Math.max(0, availableStow - currentStowCount);
+
+  const currentWeek = groupStats.currentWeek || '-';
+  const currentShift = groupStats.currentShift || '-';
+  const subA = groupStats.subgroups ? groupStats.subgroups.A : { total:0, present:0 };
+  const subB = groupStats.subgroups ? groupStats.subgroups.B : { total:0, present:0 };
+
+  const skillStats = {
+      stow: { label: 'STOW', total: 0, present: 0, busy: 0 },
+      pack: { label: 'PACK', total: 0, present: 0, busy: 0 },
+      sort: { label: 'SORT', total: 0, present: 0, busy: 0 },
+      receive: { label: 'RCV', total: 0, present: 0, busy: 0 },
+      unloading: { label: 'UNL', total: 0, present: 0, busy: 0 },
+      carts: { label: 'Carty', total: 0, present: 0, busy: 0 }, 
+      shipping: { label: 'SHIP', total: 0, present: 0, busy: 0 },
+      returns: { label: 'Zwroty', total: 0, present: 0, busy: 0 },
+      quality: { label: 'Jakość', total: 0, present: 0, busy: 0 },
+      beauty: { label: 'Beauty', total: 0, present: 0, busy: 0 }
+  };
+
+  const isBusy = (name) => {
+      const busyModes = ['stow', 'carts', 'support', 'beauty'];
+      for(const mode of busyModes) {
+          if(state.widgets[mode]?.today?.some(e => e.name === name)) return true;
+      }
+      return false;
+  };
+
+  if (state.employees) {
+      state.employees.forEach(emp => {
+          const busy = isBusy(emp.name);
+          const present = emp.isAtWork;
+          
+          if (emp.skills) {
+              for (const [key, val] of Object.entries(emp.skills)) {
+                  if (skillStats[key] && val) {
+                      skillStats[key].total++;
+                      if (present) {
+                          skillStats[key].present++;
+                          if (busy) skillStats[key].busy++;
+                      }
+                  }
+              }
+          }
+      });
+  }
+
+  let skillsRows = '';
+  for (const [key, stat] of Object.entries(skillStats)) {
+      const free = stat.present - stat.busy;
+      const availClass = (free > 0) ? 'font-bold text-slate-700' : 'text-slate-300';
+      
+      skillsRows += `
+          <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+              <td class="py-1.5 px-2 text-[10px] uppercase font-bold text-slate-500 tracking-tight">${stat.label}</td>
+              <td class="py-1.5 px-2 text-center text-xs text-slate-400 border-l border-slate-50">${stat.total}</td>
+              <td class="py-1.5 px-2 text-center text-xs font-medium text-emerald-600 bg-emerald-50/30 border-l border-slate-50">${stat.present}</td>
+              <td class="py-1.5 px-2 text-center text-xs text-amber-600 bg-amber-50/30 border-l border-slate-50">${stat.busy}</td>
+              <td class="py-1.5 px-2 text-center text-xs ${availClass} bg-slate-50/50 border-l border-slate-50">${free}</td>
+          </tr>
+      `;
+  }
+
+  const groupTitleHtml = `
+      <div class="flex items-center w-full justify-between gap-1">
+          <span class="truncate">Info o Grupie</span>
+          <button class="text-[10px] font-bold px-2 py-1 rounded cursor-pointer transition-colors border border-slate-100 bg-white text-slate-400 hover:text-blue-600 hover:border-blue-200 ml-1 shrink-0" onclick="if(typeof fetchAllData === 'function') fetchAllData()" title="Odśwież dane grupy">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+      </div>
+  `;
+  const iconGroup = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`;
+
+  const groupStatsContent = `
+    <div class="p-3 space-y-4">
+        <div class="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-lg p-3 shadow-sm">
+             <div class="flex flex-col items-start"><span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Tydzień</span><span class="text-lg font-extrabold text-slate-700 leading-none mt-1">${currentWeek}</span></div>
+             <div class="h-8 w-px bg-slate-200 mx-2"></div>
+             <div class="flex flex-col items-end"><span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Zmiana</span><span class="text-base font-extrabold text-indigo-600 leading-none mt-1">${currentShift}</span></div>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-3">
+            <div class="bg-purple-50 p-2 rounded border border-purple-100 text-center">
+                <div class="text-[9px] text-purple-600 uppercase font-bold mb-0.5">Podgrupa A</div>
+                <div class="text-base font-bold text-purple-700" title="Obecni / Wszyscy">${subA.present} <span class="text-purple-400 text-xs font-normal">/ ${subA.total}</span></div>
+            </div>
+            <div class="bg-fuchsia-50 p-2 rounded border border-fuchsia-100 text-center">
+                <div class="text-[9px] text-fuchsia-600 uppercase font-bold mb-0.5">Podgrupa B</div>
+                <div class="text-base font-bold text-fuchsia-700" title="Obecni / Wszyscy">${subB.present} <span class="text-fuchsia-400 text-xs font-normal">/ ${subB.total}</span></div>
+            </div>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+            <div class="bg-slate-100 px-3 py-1.5 border-b border-slate-200 flex justify-between items-center">
+                <span class="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Kompetencje</span>
+                <span class="text-[9px] text-slate-400 font-normal">Dostępni dzisiaj</span>
+            </div>
+            <table class="w-full border-collapse">
+                <thead>
+                    <tr class="bg-slate-50 text-[9px] text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                        <th class="py-1 px-2 text-left font-bold w-1/3">Dział</th>
+                        <th class="py-1 px-2 text-center font-normal" title="Wszyscy w bazie">All</th>
+                        <th class="py-1 px-2 text-center font-bold text-emerald-600" title="Obecni w pracy">Ob.</th>
+                        <th class="py-1 px-2 text-center font-bold text-amber-600" title="Przypisani do zadań">Zaj.</th>
+                        <th class="py-1 px-2 text-center font-bold text-slate-700" title="Dostępni (Wolni)">Wol.</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-50">
+                    ${skillsRows}
+                </tbody>
+            </table>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-center border-t border-slate-100 pt-3">
+            <div class="bg-blue-50 p-2 rounded border border-blue-100"><div class="text-[10px] text-blue-600 uppercase font-bold mb-0.5">Obecni STOW</div><div class="text-base font-bold text-blue-700" title="Obecni + Szkolenie">${availableStow}</div></div>
+            <div class="bg-indigo-50 p-2 rounded border border-indigo-100"><div class="text-[10px] text-indigo-600 uppercase font-bold mb-0.5">Pozostało STOW</div><div class="text-base font-bold text-indigo-700" title="Do wyznaczenia">${remainingStow}</div></div>
+        </div>
+        <div>
+            <div class="text-[11px] font-bold text-slate-400 uppercase mb-2 px-1 border-b pb-1">Plan Tygodniowy</div>
+            <ul class="space-y-1.5">
+                ${groupStats.plan.length > 0 ? groupStats.plan.map(p => `<li class="flex justify-between text-xs p-2 bg-white border border-slate-100 rounded hover:border-blue-200 transition"><span class="font-bold text-slate-600 w-12">${p.day}</span><span class="font-mono text-blue-600 font-bold text-right truncate" title="${p.info}">${p.info}</span></li>`).join('') : '<li class="text-xs text-slate-400 italic text-center p-2">Brak danych planowania.</li>'}
+            </ul>
+        </div>
+    </div>
+  `;
+  const cardGroup = createCard(groupTitleHtml, groupStats.present, 'bg-teal-500', iconGroup, groupStatsContent, true);
+
+  const gridClass = 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-start';
+
+  // UKŁAD WIDGETÓW: Obsada -> Ostatnio -> Info -> Beauty -> Grafik
+  container.innerHTML = `
+    <div class="grid ${gridClass} mb-8">
+        ${cardRotation}
+        ${cardRecent}
+        ${cardGroup}
+        ${cardBeautyWidget}
+        ${calendarCard}
+    </div>
+  `;
+}
+
+// === LOGIKA KALENDARZA (BEZ ZMIAN) ===
+window.changeCalendarMonth = function(delta) {
+    state.calendarOffset += delta;
+    state.calendarData = null; 
+    renderStowersWidgetUI(); 
+};
+
+function fetchCalendarData(offset) {
+    state.isCalendarFetching = true;
+    const group = state.settings.userGroup;
+    google.script.run
+        .withSuccessHandler(data => {
+            state.calendarData = data;
+            state.isCalendarFetching = false;
+            renderStowersWidgetUI();
+        })
+        .withFailureHandler(err => {
+            state.calendarData = { error: err.message };
+            state.isCalendarFetching = false;
+            renderStowersWidgetUI();
+        })
+        .getMonthlySchedule(group, offset);
+}
+
+function renderCalendarGrid(data) {
+    if (data.error) return `<div class="text-red-500 text-xs text-center p-4">Błąd: ${data.error}</div>`;
+    const days = data.days || [];
+    if (days.length === 0) return `<div class="flex flex-col items-center justify-center p-4 text-slate-400 h-48"><span class="text-xs italic mb-1">Brak danych grafiku dla:</span><span class="text-xs font-bold text-slate-500 mb-2">${data.monthLabel || 'Wybranego miesiąca'}</span><span class="text-[9px] text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100">Użyj strzałek ◀ ▶</span></div>`;
+
+    const weekDays = ['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Nd'];
+    let gridHtml = `<div class="grid grid-cols-7 gap-1 mb-2 text-center text-[9px] font-bold text-slate-400 uppercase tracking-wide">`;
+    weekDays.forEach(d => gridHtml += `<div>${d}</div>`);
+    gridHtml += `</div><div class="grid grid-cols-7 gap-1 text-center text-xs">`;
+    
+    const startOffset = data.startDayOfWeek || 0; 
+    for(let i=0; i<startOffset; i++) gridHtml += `<div class="aspect-square"></div>`;
+    
+    days.forEach(d => {
+        let bgClass = "bg-slate-50 border-slate-100 text-slate-400"; 
+        let label = d.day;
+        const shift = d.shift ? d.shift.toLowerCase() : "";
+        if (shift.includes("zmiana 1") || shift === "1") bgClass = "bg-blue-100 border-blue-200 text-blue-700 font-bold";
+        else if (shift.includes("zmiana 2") || shift === "2") bgClass = "bg-orange-100 border-orange-200 text-orange-700 font-bold";
+        else if (shift.includes("zmiana 3") || shift === "3") bgClass = "bg-violet-100 border-violet-200 text-violet-700 font-bold";
+        else if (shift.includes("wolne")) bgClass = "bg-emerald-50 border-emerald-100 text-emerald-600";
+        else if (shift.includes("urlop")) bgClass = "bg-yellow-100 border-yellow-200 text-yellow-700";
+
+        gridHtml += `<div class="aspect-square flex flex-col items-center justify-center rounded border ${bgClass} p-1 transition hover:opacity-80 cursor-default" title="Dzień ${d.day}: ${d.shift}"><span class="text-sm leading-none">${label}</span>${shift !== "wolne" && shift !== "" ? `<span class="text-[8px] leading-none mt-0.5 opacity-75">${shift.replace("zmiana ", "")}</span>` : ''}</div>`;
+    });
+    return gridHtml + `</div>`;
+}
+
+window.setBeautyDay = function(offset, force = false) {
+    if (!force && state.beautyDayOffset === offset) return;
+    state.beautyDayOffset = offset;
+    state.planningData = []; 
+    renderStowersWidgetUI(); 
+    const msg = force ? "Odświeżanie planu..." : "Pobieranie planu...";
+    if(typeof showToast === 'function') showToast(msg, "info");
+    google.script.run.withSuccessHandler(data => { state.planningData = data || []; renderStowersWidgetUI(); if(typeof showToast === 'function') showToast("Zaktualizowano plan.", "success"); }).withFailureHandler(err => { if(typeof showToast === 'function') showToast("Błąd pobierania: " + err.message, "error"); renderStowersWidgetUI(); }).getPlanningData(offset, true);
+};
+
+function buildSimpleList(list, isToday, mode) {
+  if (!list || list.length === 0) return `<p class="text-sm text-slate-400 italic p-3 text-center">Brak wpisów.</p>`;
+  return `<ul class="divide-y divide-slate-100 border-t border-slate-100 last:border-b-0">` +
+    list.map(p => {
+      const rawName = p.name || "Nieznany";
+      const safeName = rawName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      let extra = '';
+      if (p.break && p.break !== '--' && p.break !== '') extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 mr-1.5 whitespace-nowrap">${p.break}</span>`;
+      if (p.floor && p.floor !== '--' && p.floor !== '') extra += `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 whitespace-nowrap">${p.floor}</span>`;
+      const delBtn = isToday ? `<button class="ml-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all p-1" onclick="handleWidgetDelete('${mode}', '${safeName}')" title="Usuń"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>` : '';
+      return `<li class="p-2.5 flex justify-between items-center text-sm hover:bg-slate-50 transition group"><span class="font-medium text-slate-700 truncate mr-2" title="${rawName}">${rawName}</span><div class="flex items-center shrink-0">${extra}${delBtn}</div></li>`;
+    }).join('') + `</ul>`;
+}
+
+window.handleWidgetDelete = function(mode, name) {
+  const decodedName = name.replace(/\\'/g, "'").replace(/&quot;/g, '"');
+  if (!confirm(`Usunąć ${decodedName} z listy ${mode.toUpperCase()}?`)) return;
+  if (state.widgets[mode]?.today) { state.widgets[mode].today = state.widgets[mode].today.filter(p => p.name !== decodedName); renderStowersWidgetUI(); }
+  if (state.currentMode === mode && state.stowData) { const emp = state.stowData.find(e => e.name === decodedName); if (emp) { emp.wasToday = false; if (typeof renderUnifiedList === 'function') renderUnifiedList(); } }
+  google.script.run.withSuccessHandler(res => { if (res.success) { if(typeof showToast === 'function') showToast(res.message, 'success'); if (state.currentMode === mode) loadRotationalData(); } else { if(typeof showToast === 'function') showToast(res.message, 'error'); if (state.currentMode === mode) loadRotationalData(); } }).withFailureHandler(err => { if(typeof showToast === 'function') showToast("Błąd: " + err.message, 'error'); if (state.currentMode === mode) loadRotationalData(); }).deleteRotationalEntry(mode, decodedName);
+};
+</script>

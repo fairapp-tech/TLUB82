@@ -1,0 +1,305 @@
+<script>
+// Plik: JS-UI-Modals.html
+// Moduł: Obsługa Modali (Usuwanie, Edycja, Historia, Ustawienia, Kolizje, Import Grafiku)
+// Wersja: User Group & Schedule Import Support
+
+console.log("Ładowanie modułu UI Modals...");
+
+// =====================================================
+// === MODAL KOLIZJI (NOWE) ===
+// =====================================================
+
+function openCollisionModalUI(name, collisionInfo, checkbox) {
+    if (!dom.collisionModal) return;
+    
+    // Zapisz kontekst, żeby wiedzieć co zrobić po kliknięciu "Tak"
+    state.pendingCollision = {
+        name: name,
+        checkbox: checkbox
+    };
+
+    if (dom.collisionModalText) {
+        dom.collisionModalText.innerHTML = `
+            Pracownik <b>${name}</b> jest już wyznaczony do zadania: 
+            <span class="font-bold text-amber-600">${collisionInfo}</span>.
+            <br><br>
+            Czy chcesz zapisać go równolegle w obu miejscach?
+        `;
+    }
+
+    dom.collisionModal.classList.remove('hidden');
+    dom.collisionModal.classList.add('flex');
+}
+
+function closeCollisionModalUI() {
+    if (!dom.collisionModal) return;
+    dom.collisionModal.classList.add('hidden');
+    dom.collisionModal.classList.remove('flex');
+    state.pendingCollision = { name: null, checkbox: null };
+}
+
+// Funkcja wywoływana przez przycisk "Zapisz Równolegle"
+function confirmCollisionUI() {
+    const { checkbox, name } = state.pendingCollision;
+    
+    if (checkbox) {
+        // 1. Zaznacz checkboxa wizualnie
+        checkbox.checked = true;
+        
+        // 2. Znajdź wiersz i zmień tło
+        const row = checkbox.closest('[data-name]');
+        if (row) {
+            row.classList.add('bg-blue-50');
+            row.classList.remove('bg-white');
+            
+            // 3. Pobierz wartości z selectów (jeśli są) - aby zapisać poprawne parametry
+            let val1 = '';
+            let val2 = '';
+            const s1 = row.querySelector('.assignment-param-1');
+            const s2 = row.querySelector('.assignment-param-2');
+            if (s1) val1 = s1.value;
+            if (s2) val2 = s2.value;
+            
+            // 4. Dodaj do pamięci Persistent Selection
+            if (state.pendingAssignments) {
+                state.pendingAssignments.set(name, { break: val1, floor: val2 });
+            }
+        }
+        
+        // 5. Zaktualizuj liczniki
+        if (typeof updateActionCount === 'function') updateActionCount();
+        if (typeof updateClearButtonVisibility === 'function') updateClearButtonVisibility();
+        
+        showToast(`Dodano ${name} do listy (równolegle).`, 'info');
+    }
+    
+    closeCollisionModalUI();
+}
+
+// =====================================================
+// === MODAL USUWANIA ===
+// =====================================================
+
+function openDeleteModalUI(ids, isBulk) {
+  if (!dom.deleteModal) return;
+  state.taskToDelete = { id: ids, isBulk: isBulk };
+  if (dom.deleteModalText) {
+    dom.deleteModalText.textContent = isBulk 
+      ? `Czy na pewno usunąć ${ids.length} zaznaczonych elementów?` 
+      : 'Czy na pewno chcesz usunąć to zadanie?';
+  }
+  dom.deleteModal.classList.remove('hidden');
+  dom.deleteModal.classList.add('flex');
+}
+
+function closeDeleteModalUI() {
+  if (!dom.deleteModal) return;
+  dom.deleteModal.classList.add('hidden');
+  dom.deleteModal.classList.remove('flex');
+  state.taskToDelete = { id: null, isBulk: false };
+}
+
+// =====================================================
+// === MODAL EDYCJI ===
+// =====================================================
+
+function openEditModalUI(task) {
+  if (!dom.editModal) return;
+  if (dom.editDescription) dom.editDescription.value = task.description;
+  if (dom.editDeadline) {
+    const parts = task.deadline ? task.deadline.split('.') : [];
+    dom.editDeadline.value = (parts.length === 3) 
+      ? `${parts[2]}-${parts[1]}-${parts[0]}` 
+      : '';
+  }
+  if (dom.editPriority) dom.editPriority.value = task.priority;
+  state.taskToEditId = task.taskId;
+  dom.editModal.classList.remove('hidden');
+  dom.editModal.classList.add('flex');
+}
+
+function closeEditModalUI() {
+  if (!dom.editModal) return;
+  state.taskToEditId = null;
+  dom.editModal.classList.add('hidden');
+  dom.editModal.classList.remove('flex');
+}
+
+// =====================================================
+// === MODAL HISTORII ===
+// =====================================================
+
+function openHistoryModalUI(name) {
+  if (dom.historyModalTitle) dom.historyModalTitle.textContent = `Historia: ${name}`;
+  if (dom.historyList) {
+    dom.historyList.innerHTML = `<div class="p-8 text-center text-slate-500"><div class="loader-sm mb-2"></div><br>Pobieranie historii...</div>`;
+  }
+  if (dom.historyModal) {
+    dom.historyModal.classList.remove('hidden');
+    dom.historyModal.classList.add('flex');
+  }
+}
+
+function closeHistoryModalUI() {
+  if (dom.historyModal) {
+    dom.historyModal.classList.add('hidden');
+    dom.historyModal.classList.remove('flex');
+  }
+}
+
+function renderHistoryModalList(historyData) {
+  if (!dom.historyList) return;
+  if (!historyData || historyData.length === 0) {
+    dom.historyList.innerHTML = `
+      <div class="flex flex-col items-center justify-center h-48 text-slate-400 p-6 text-center">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 mb-3 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        <p class="text-sm">Brak wpisów w historii rocznej.</p>
+      </div>`;
+    return;
+  }
+  const listHtml = historyData.map(entry => `
+      <div class="flex items-center justify-between p-3 border-b border-slate-100 hover:bg-slate-50 transition text-xs">
+        <div><span class="font-bold text-slate-700 block text-sm">${entry.date}</span></div>
+        <div class="flex gap-2">
+           ${entry.breakVal ? `<span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded border border-amber-100 font-medium whitespace-nowrap">P: ${entry.breakVal}</span>` : ''}
+           ${entry.floor ? `<span class="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100 font-medium whitespace-nowrap">${entry.floor}</span>` : ''}
+        </div>
+      </div>
+  `).join('');
+  dom.historyList.innerHTML = `<div class="divide-y divide-slate-100">${listHtml}</div>`;
+}
+
+// =====================================================
+// === MODAL USTAWIENIA (SETTINGS) ===
+// =====================================================
+
+function openSettingsModalUI() {
+    if (!dom.settingsModal) return;
+    
+    // 1. Wczytaj domyślny tryb
+    if (dom.settingsDefaultMode) dom.settingsDefaultMode.value = state.settings.defaultMode;
+    
+    // 2. Wczytaj Grupę Użytkownika (NOWE)
+    if (dom.settingsUserGroup) {
+        dom.settingsUserGroup.value = state.settings.userGroup || "";
+    }
+
+    // 3. Renderuj listy ról
+    renderRolesListUI('support');
+    renderRolesListUI('missions');
+    
+    // 4. Wyczyść pole importu
+    if (dom.importScheduleText) dom.importScheduleText.value = '';
+    
+    dom.settingsModal.classList.remove('hidden');
+    dom.settingsModal.classList.add('flex');
+}
+
+function closeSettingsModalUI() {
+    if (!dom.settingsModal) return;
+    dom.settingsModal.classList.add('hidden');
+    dom.settingsModal.classList.remove('flex');
+}
+
+function renderRolesListUI(type) {
+    const listContainer = (type === 'support') ? dom.rolesSupportList : dom.rolesMissionsList;
+    if (!listContainer) return;
+    const roles = state.settings.customRoles[type];
+    listContainer.innerHTML = '';
+    roles.forEach((role, index) => {
+        const item = document.createElement('div');
+        item.className = "flex justify-between items-center bg-slate-100 p-2 rounded border border-slate-200 text-xs";
+        item.innerHTML = `
+            <span class="font-medium text-slate-700">${role}</span>
+            <button onclick="removeRoleUI('${type}', ${index})" class="text-slate-400 hover:text-red-500 transition-colors p-1">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        `;
+        listContainer.appendChild(item);
+    });
+}
+
+window.removeRoleUI = function(type, index) {
+    state.settings.customRoles[type].splice(index, 1);
+    renderRolesListUI(type);
+};
+
+window.addRoleUI = function(type) {
+    const input = (type === 'support') ? dom.newSupportRole : dom.newMissionRole;
+    if (!input) return;
+    const val = input.value.trim();
+    if (val) {
+        state.settings.customRoles[type].push(val);
+        input.value = '';
+        renderRolesListUI(type);
+    }
+};
+
+window.saveSettingsUI = function() {
+    // 1. Zapisz tryb domyślny
+    if (dom.settingsDefaultMode) state.settings.defaultMode = dom.settingsDefaultMode.value;
+    
+    // 2. Zapisz grupę (NOWE)
+    if (dom.settingsUserGroup) state.settings.userGroup = dom.settingsUserGroup.value;
+
+    const btn = dom.saveSettingsBtn;
+    if(btn) { btn.disabled = true; btn.textContent = "Zapisywanie..."; }
+    
+    google.script.run
+        .withSuccessHandler(res => {
+            if(btn) { btn.disabled = false; btn.textContent = "Zapisz Ustawienia"; }
+            closeSettingsModalUI();
+            showToast(res.message, 'success');
+            
+            // Odśwież widok, aby zastosować nową grupę/tryb
+            if (typeof renderStowersWidgetUI === 'function') renderStowersWidgetUI(); // Aktualizacja Info o Grupie
+            if (typeof fetchAllData === 'function') fetchAllData(); // Pobranie świeżych danych (z nową zmianą dla grupy)
+        })
+        .withFailureHandler(err => {
+            if(btn) { btn.disabled = false; btn.textContent = "Zapisz Ustawienia"; }
+            showToast("Błąd zapisu: " + err.message, 'error');
+        })
+        .saveAppSettings(state.settings);
+};
+
+// =====================================================
+// === IMPORT GRAFIKU (NOWE) ===
+// =====================================================
+
+function handleImportScheduleUI() {
+    if (!dom.importScheduleText) return;
+    const rawData = dom.importScheduleText.value;
+    
+    if (!rawData || rawData.trim() === '') {
+        showToast("Pole importu jest puste.", "error");
+        return;
+    }
+
+    const btn = dom.importScheduleBtn;
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Importowanie...";
+    }
+
+    google.script.run
+        .withSuccessHandler(res => {
+            if(btn) { btn.disabled = false; btn.textContent = "Zaimportuj Grafik"; }
+            if (dom.importScheduleText) dom.importScheduleText.value = ''; // Wyczyść
+            showToast(res.message, 'success');
+            // Opcjonalnie: Odśwież dane, aby zobaczyć efekt w Info o Grupie
+            if (typeof fetchAllData === 'function') fetchAllData();
+        })
+        .withFailureHandler(err => {
+            if(btn) { btn.disabled = false; btn.textContent = "Zaimportuj Grafik"; }
+            showToast("Błąd importu: " + err.message, 'error');
+        })
+        .importScheduleData(rawData);
+}
+
+// Inicjalizacja Listenera Importu (Self-Init)
+document.addEventListener('DOMContentLoaded', () => {
+    if (dom.importScheduleBtn) {
+        dom.importScheduleBtn.addEventListener('click', handleImportScheduleUI);
+    }
+});
+</script>
